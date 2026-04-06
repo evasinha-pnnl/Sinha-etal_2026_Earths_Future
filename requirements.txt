@@ -1,0 +1,31 @@
+# Requirements for the LDRD 2026 heatwave analysis scripts
+# Install into the py39_tell conda environment:
+#   conda activate py39_tell
+#   pip install -r requirements.txt
+#
+# Minimum version pins are based on the APIs used in this project;
+# exact versions in the development environment are noted in comments.
+
+# ── Core scientific stack ────────────────────────────────────────────────────
+numpy>=1.24           # array operations, searchsorted, polyfit
+pandas>=2.0           # DataFrame, groupby, read_csv/parquet, Timestamp
+scipy>=1.10           # (used transitively; OLS via numpy.polyfit is sufficient)
+xarray>=2023.1        # NetCDF loading, DataArray operations
+
+# ── Climate / geospatial ─────────────────────────────────────────────────────
+cartopy>=0.21         # map projections for spatial plots
+pyproj>=3.5           # coordinate reference system transforms (via cartopy)
+
+# ── Visualisation ────────────────────────────────────────────────────────────
+matplotlib>=3.7       # all figure generation
+
+# ── I/O ──────────────────────────────────────────────────────────────────────
+fastparquet>=2023.4   # read/write .parquet files (grid_cell_to_ba.EAMxx.parquet)
+# Alternative parquet engine (either works with pandas):
+# pyarrow>=12.0
+
+# ── TELL electricity-load model ──────────────────────────────────────────────
+# TELL is not on PyPI; install separately from source:
+#   git clone https://github.com/IMMM-SFA/tell.git
+#   pip install -e tell/
+# tell
