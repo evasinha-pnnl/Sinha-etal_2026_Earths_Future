@@ -8,11 +8,11 @@ The ensemble member definitions and output directory are imported directly
 from run_heatwave_ensemble so there is a single source of truth.
 
 CSV layout (one file per member per metric):
-  ensemble_output/<data_source>/<data_source>_t2m_<tag>_<yr>.csv
+  outputs/<data_source>/<data_source>_t2m_<tag>_<yr>.csv
   Columns: time, dayofyear, Data_Source, <value_col>
 
 Output plots are written to:
-  ensemble_output/comparison/
+  outputs/comparison/
 
 Notes
 -----
@@ -199,9 +199,10 @@ def plot_comparison(metric: TimeseriesMetric, varnames: str = "t2m") -> None:
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
     fig.autofmt_xdate(rotation=30)
     ax.tick_params(labelsize=13)
+    n_sources = len(df["Data_Source"].unique())
     ax.legend(
         loc="upper center",
-        ncol=len(df["Data_Source"].unique()),
+        ncol=min(4, n_sources),
         bbox_to_anchor=(0.5, -0.15),
         frameon=True,
         fontsize=13,

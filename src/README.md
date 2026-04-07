@@ -14,6 +14,9 @@ src/
 ├── compare_heatwaves.py           # Compare heatwave metrics across members
 ├── build_grid_to_ba.py            # Build grid-cell → BA mapping parquet (one-time)
 ├── analyze_tell_heatwave.py       # Link TELL load to heatwave events (main script)
+├── decompose_load_anomaly.py      # OLS decomposition: load anomaly vs HW drivers
+├── interconnection_stress.py      # System-wide stress across U.S. interconnections (Analyses A + B)
+├── mean_shift_decompose.py        # ⚠️ NOT APPLICABLE — see script docstring (requires non-heatwave days)
 ├── util_heatwaves.py              # Heatwave utility functions
 ├── util_spatial_plots.py          # Spatial plotting helpers
 ├── util_contour_levels.py         # Contour level definitions
@@ -24,7 +27,7 @@ src/
 Generated at runtime (not tracked by git):
 
 ```
-ensemble_output/
+outputs/
   <member>/                        # Per-member heatwave plots and CSVs
   tell_heatwave_linkage/           # TELL–heatwave linkage figures and CSVs
 grid_cell_to_ba.EAMxx.parquet     # Built by build_grid_to_ba.py
@@ -71,8 +74,12 @@ pip install -r requirements.txt
 |-------|-------------|-------------|
 | `EAMxx_ctrl` | `heatwave_201107/` | Present-day control |
 | `EAMxx_ctrl_p12` | `heatwave_201107_p12/` | Present-day control +1.2 K |
+| `EAMxx_ctrl_p24` | `heatwave_201107_p24/` | Present-day control +1.2 K |
+| `EAMxx_ctrl_n24` | `heatwave_201107_n24/` | Present-day control +1.2 K |
 | `EAMxx_SSP245` | `heatwave_201107_SSP245/` | SSP2-4.5 perturbation |
 | `EAMxx_SSP245_p12` | `heatwave_201107_SSP245_p12/` | SSP2-4.5 +1.2 K perturbation |
+| `EAMxx_SSP245_p24` | `heatwave_201107_SSP245_p24/` | SSP2-4.5 +1.2 K perturbation |
+| `EAMxx_SSP245_n24` | `heatwave_201107_SSP245_n24/` | SSP2-4.5 +1.2 K perturbation |
 
 ---
 
@@ -92,7 +99,7 @@ python build_grid_to_ba.py
 ### Step 2 – Run the heatwave ensemble pipeline
 
 Runs `identify_heatwaves.py` for all four EAMxx members **in parallel** and
-writes per-member plots and CSVs to `ensemble_output/<member>/`.
+writes per-member plots and CSVs to `outputs/<member>/`.
 
 ```bash
 # Run all members (default: parallel with all available CPUs)
@@ -111,7 +118,7 @@ python run_heatwave_ensemble.py EAMxx_ctrl EAMxx_SSP245 --workers 2
 python compare_heatwaves.py
 ```
 
-Outputs figures to `ensemble_output/` comparing frequency, intensity, and
+Outputs figures to `outputs/` comparing frequency, intensity, and
 duration across all members.
 
 ### Step 4 – Link TELL load to heatwave events
@@ -137,7 +144,7 @@ Available CLI flags:
 |------|---------|-------------|
 | `--year` | `2011` | Simulation year (locates TELL CSVs and heatwave output) |
 | `--threshold` | `0.0` | Min BA area fraction under heatwave (0 = any overlap) |
-| `--output-dir` | `ensemble_output/tell_heatwave_linkage/` | Output directory for figures and CSVs |
+| `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory for figures and CSVs |
 | `--tell-base` | `$TELL_BASE` or built-in path | Root directory of TELL output CSVs |
 
 This is the main analysis script. On first run it performs an expensive
@@ -145,17 +152,156 @@ spatial-filter computation (heatwave mask → BA overlap fractions) and caches
 the result to:
 
 ```
-ensemble_output/tell_heatwave_linkage/tell_heatwave_affected_bas.csv
+outputs/tell_heatwave_linkage/tell_heatwave_affected_bas.csv
 ```
 
 Subsequent runs load from cache automatically. To force a recompute, delete
 that CSV file.
 
+### Step 5 – OLS decomposition of the load anomaly (Analysis 1)
+
+Answers: *How much of the warming-driven peak-load increase is explained by
+heatwave spatial extent, mean intensity, or peak intensity?*
+
+Reads the `tell_heatwave_merged.csv` written by Step 4 and fits a
+standardised OLS model per perturbation member:
+
+```
+peak_load_anomaly_GW  ~  β₀ + β₁·hw_area_km2 + β₂·hw_mean_K + β₃·hw_max_K
+```
+
+All predictors and the response are standardised before fitting, so the
+resulting β* coefficients are directly comparable across predictors.
+
+```bash
+# Default run (reads from outputs/tell_heatwave_linkage/)
+python decompose_load_anomaly.py
+
+# Override input / output paths
+python decompose_load_anomaly.py \
+    --merged-csv /path/to/tell_heatwave_merged.csv \
+    --output-dir /path/to/output/
+
+# See all options
+python decompose_load_anomaly.py --help
+```
+
+Available CLI flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--merged-csv` | `outputs/tell_heatwave_linkage/tell_heatwave_merged.csv` | Input merged CSV from Step 4 |
+| `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory for figures and CSV |
+| `--min-hw-frac` | `0.0` | Minimum BA heatwave-area fraction (0–1) for inclusion in regression. Rows with `hw_area_frac ≤` this value are dropped. E.g. `0.1` keeps only BAs where ≥10 % of territory is under the heatwave. |
+
+---
+
+### Step 6 – Interconnection-level stress analysis (Analyses A + B)
+
+Answers: *Does future warming increase the simultaneous stress on multiple
+U.S. electricity interconnections, and by how much in load terms?*
+
+Uses `BA_to_Interconnection_Mapping.csv` (repo root) to map each BA to one of
+the three U.S. interconnections (EIC, WECC, ERCOT), then aggregates
+`tell_heatwave_merged.csv` to the interconnection level.
+
+**Analysis A — Load stress time-series**
+Sums daily peak-load anomaly over all BAs per interconnection × member.
+Compares perturbation vs control to quantify warming-driven load increase at
+the interconnection scale.
+
+**Analysis B — Daily co-occurrence index**
+Counts how many interconnections simultaneously exceed a configurable stress
+threshold on each day.  Compares co-occurrence counts between perturbation and
+control members.
+
+> **Note on probability framing:** with only 2 perturbation members × 8 days,
+> the results are descriptive (magnitude and co-occurrence during this specific
+> event) rather than statistical (return-period or likelihood changes).  A
+> larger ensemble or longer simulation window would be needed to compute robust
+> probability changes.
+
+```bash
+# Default run (threshold = any positive anomaly)
+python interconnection_stress.py
+
+# Use a more stringent stress threshold (e.g. 5 GW)
+python interconnection_stress.py --stress-threshold-gw 5.0
+
+# Override paths
+python interconnection_stress.py \
+    --merged-csv /path/to/tell_heatwave_merged.csv \
+    --ba-map     /path/to/BA_to_Interconnection_Mapping.csv \
+    --output-dir /path/to/output/
+
+# See all options
+python interconnection_stress.py --help
+```
+
+Available CLI flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--merged-csv` | `outputs/tell_heatwave_linkage/tell_heatwave_merged.csv` | Input merged CSV from Step 4 |
+| `--ba-map` | `BA_to_Interconnection_Mapping.csv` | BA → Interconnection lookup CSV |
+| `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory for figures and CSVs |
+| `--stress-threshold-gw` | `0.0` | Min load anomaly (GW) for an interconnection to count as "stressed" |
+| `--min-hw-frac` | `0.0` | Min BA heatwave-area fraction; rows at or below this are excluded |
+
+---
+
+### Step 7 – Mean-shift baseline vs heatwave-excess decomposition (Analysis 2)
+
+> ⚠️ **NOT APPLICABLE to the current EAMxx data.**
+>
+> The EAMxx simulations cover only the heatwave window (`2011-07-17` –
+> `2011-07-24`).  Every day in the dataset is a heatwave day, so there are no
+> non-heatwave days from which to estimate the mean-shift baseline.  Running
+> the script raises a `NotImplementedError` with a detailed explanation.
+>
+> **What would be needed:** re-run EAMxx over a longer window (e.g. full July
+> or JJA) so that non-heatwave days are available, or use a multi-year
+> climatological TELL run as the reference.  See the `mean_shift_decompose.py`
+> module docstring for full details and alternative approaches.
+
+*Algorithm (for future use):* Reads `tell_load_daily_all.csv` (all days,
+produced by Step 4) and `tell_heatwave_affected_bas.csv` (spatial filter) and
+partitions the peak-load anomaly into two additive components per BA × member:
+
+- **Mean-shift baseline** — mean anomaly on **non-heatwave days** (isolates
+  the always-on background warming signal)
+- **Heatwave excess** — anomaly on heatwave days minus the baseline (isolates
+  the incremental load driven by the heatwave itself)
+
+```bash
+# Default run (reads from outputs/tell_heatwave_linkage/)
+python mean_shift_decompose.py
+
+# Override paths or BA-fraction threshold
+python mean_shift_decompose.py \
+    --load-csv   /path/to/tell_load_daily_all.csv \
+    --filter-csv /path/to/tell_heatwave_affected_bas.csv \
+    --output-dir /path/to/output/ \
+    --threshold  0.0
+
+# See all options
+python mean_shift_decompose.py --help
+```
+
+Available CLI flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--load-csv` | `outputs/tell_heatwave_linkage/tell_load_daily_all.csv` | All-days load CSV from Step 4 |
+| `--filter-csv` | `outputs/tell_heatwave_linkage/tell_heatwave_affected_bas.csv` | Spatial filter CSV from Step 4 |
+| `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory for figures and CSV |
+| `--threshold` | `0.0` | Min BA heatwave-area fraction to classify a day as a heatwave day |
+
 ---
 
 ## Outputs
 
-All outputs are written to `ensemble_output/tell_heatwave_linkage/`:
+All outputs are written to `outputs/tell_heatwave_linkage/`:
 
 | File | Description |
 |------|-------------|
@@ -165,9 +311,24 @@ All outputs are written to `ensemble_output/tell_heatwave_linkage/`:
 | `tell_affected_bas_per_day.png` | Bar chart: # of heatwave-affected BAs per day, all members |
 | `tell_load_anomaly_timeseries_per_ba.png` | Daily peak-load anomaly (GW) for top 5 BAs — one subplot per member |
 | `tell_load_anomaly_pct_timeseries_per_ba.png` | Same, as % of control load |
-| `tell_load_anomaly_timeseries_per_ba_comparison.png` | Daily peak-load anomaly (GW) for top 5 BAs — one subplot per BA, lines per member |
+| `tell_load_anomaly_timeseries_per_ba_comparison.png` | 2×2 grid: top 4 BAs by HW fraction — lines per member (GW) |
 | `tell_load_anomaly_pct_timeseries_per_ba_comparison.png` | Same, as % of control load |
+| `tell_load_anomaly_timeseries_per_ba_comparison_top_anomaly.png` | 2×2 grid: top 4 BAs by largest load anomaly — lines per member (GW) |
+| `tell_load_anomaly_pct_timeseries_per_ba_comparison_top_anomaly.png` | Same, as % of control load |
 | `tell_load_vs_heatwave_scatter.png` | Scatter: load anomaly vs spatial extent / intensity |
+| `tell_load_decomp_regression_table.csv` | OLS results: β*, SE, 95% CI, p-value, R² per member × predictor |
+| `tell_load_decomp_std_coeffs.png` | Standardised OLS coefficients β* with 95% CI — grouped bar chart |
+| `tell_load_decomp_partial_regression.png` | Partial-regression plots — load anomaly vs each HW characteristic |
+| `tell_interconnection_load_anomaly_GW.csv` | Per (date, interconnection, member): summed load anomaly GW, ctrl GW, anomaly % |
+| `tell_interconnection_load_timeseries.png` | Three-panel time-series — load anomaly (GW) per interconnection, pert vs ctrl |
+| `tell_interconnection_load_timeseries_pct.png` | Same, expressed as % of control load |
+| `tell_interconnection_stress_heatmap.png` | Date × interconnection heatmap of load anomaly (GW); red border = above threshold |
+| `tell_interconnection_cooccurrence_summary.csv` | Per (date, member): count and list of simultaneously stressed interconnections |
+| `tell_interconnection_cooccurrence.png` | Daily co-occurrence bar chart — # of simultaneously stressed interconnections |
+| `tell_mean_shift_decomp_summary.csv` | Per (BA, member): baseline, mean HW excess, total anomaly, component fractions |
+| `tell_mean_shift_decomp_stacked_bar.png` | Grouped stacked bars — baseline (light blue) vs HW excess (colour) for top BAs |
+| `tell_mean_shift_decomp_timeseries.png` | Daily stacked-area time-series: baseline + HW excess per top BA × member |
+| `tell_mean_shift_decomp_fraction_bar.png` | 100 % stacked bar: fraction of total anomaly from each component per BA |
 
 ---
 
@@ -183,7 +344,7 @@ Key settings in `analyze_tell_heatwave.py`:
 | `TELL_BASE` | `TELL_BASE` | `--tell-base` | `/global/.../TELL_outputs` | Root directory of TELL output CSVs |
 | `YEAR` | — | `--year` | `2011` | Simulation year |
 | `HW_BA_FRAC_THRESHOLD` | — | `--threshold` | `0.0` | Min BA area fraction under heatwave |
-| `OUTPUT_DIR` | — | `--output-dir` | `ensemble_output/tell_heatwave_linkage/` | Output directory |
+| `OUTPUT_DIR` | — | `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory |
 
 ---
 

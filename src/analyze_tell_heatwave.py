@@ -64,6 +64,7 @@ from run_heatwave_ensemble import (
     EAMXX_BASE_PATH,
     _MEMBER_LOOKUP,
 )
+from util_constants import ANOMALY_PAIRS, FONTSIZE, MEMBER_COLORS
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -90,23 +91,19 @@ TELL_BASE = Path(os.environ.get("TELL_BASE", _TELL_BASE_DEFAULT))
 TELL_MEMBER_DIRS: dict[str, str] = {
     "EAMxx_ctrl":        "EAMxx",
     "EAMxx_ctrl_p12":    "EAMxx_p12",
+    "EAMxx_ctrl_p24":    "EAMxx_p24",
+    "EAMxx_ctrl_n24":    "EAMxx_n24",
     "EAMxx_SSP245":      "EAMxx_SSP245",
     "EAMxx_SSP245_p12":  "EAMxx_SSP245_p12",
-}
-
-# Anomaly pairs: {perturbation member → its matching control member}
-# EAMxx_SSP245     is compared against EAMxx_ctrl
-# EAMxx_SSP245_p12 is compared against EAMxx_ctrl_p12
-ANOMALY_PAIRS: dict[str, str] = {
-    "EAMxx_SSP245":      "EAMxx_ctrl",
-    "EAMxx_SSP245_p12":  "EAMxx_ctrl_p12",
+    "EAMxx_SSP245_p24":  "EAMxx_SSP245_p24",
+    "EAMxx_SSP245_n24":  "EAMxx_SSP245_n24",
 }
 
 # Shared analysis window (must overlap all TELL files)
 ANALYSIS_WINDOW = ("2011-07-17", "2011-07-24")
 
 # Heatwave ensemble output root (produced by run_heatwave_ensemble.py)
-ENSEMBLE_OUTPUT = Path(__file__).parent / "ensemble_output"
+ENSEMBLE_OUTPUT = Path(__file__).parent / "outputs"
 
 # Heatwave CSV tags & their value columns (must match _save_timeseries output)
 HW_AREA_TAG   = "largest_contiguous_heatwave_area_timeseries"
@@ -122,13 +119,7 @@ YEAR     = 2011
 # Output directory for TELL–heatwave linkage figures
 OUTPUT_DIR = ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
 
-# Colour map for members (ctrl = blue baseline, perturbations = warm colours)
-MEMBER_COLORS: dict[str, str] = {
-    "EAMxx_ctrl":        "#1f77b4",   # blue
-    "EAMxx_ctrl_p12":    "#ff7f0e",   # orange
-    "EAMxx_SSP245":      "#2ca02c",   # green
-    "EAMxx_SSP245_p12":  "#d62728",   # red
-}
+# MEMBER_COLORS, ANOMALY_PAIRS, and FONTSIZE are imported from util_constants.
 
 # ---------------------------------------------------------------------------
 # Spatial filtering configuration
@@ -214,6 +205,8 @@ def compute_load_anomaly(tell_df: pd.DataFrame) -> pd.DataFrame:
 
         EAMxx_SSP245     − EAMxx_ctrl
         EAMxx_SSP245_p12 − EAMxx_ctrl_p12
+        EAMxx_SSP245_p24 − EAMxx_ctrl_p24
+        EAMxx_SSP245_n24 − EAMxx_ctrl_n24
 
     Returns only the perturbation rows with an added ``load_anomaly`` column.
     """
@@ -234,8 +227,6 @@ def compute_load_anomaly(tell_df: pd.DataFrame) -> pd.DataFrame:
             pert_member, ctrl_member, merged["load_anomaly"].notna().sum(),
         )
 
-    if not result_dfs:
-        raise ValueError("No anomaly pairs found. Check ANOMALY_PAIRS configuration.")
     return pd.concat(result_dfs, ignore_index=True)
 
 
@@ -254,20 +245,32 @@ def _load_hw_csv(data_source: str, tag: str, value_col: str, cfg: Config) -> pd.
         return pd.DataFrame(columns=["date", value_col])
     df = pd.read_csv(fname, parse_dates=["time"])
     df["date"] = df["time"].dt.normalize()
-    return df[["date", value_col]].drop_duplicates("date")
+    n_before = len(df)
+    df = df[["date", value_col]].drop_duplicates("date")
+    if len(df) < n_before:
+        log.debug(
+            "_load_hw_csv: dropped %d duplicate date rows from %s",
+            n_before - len(df), fname.name,
+        )
+    return df
 
 
 def load_heatwave_characteristics(cfg: Config) -> pd.DataFrame:
     """
     Load area, mean-anomaly, and max-anomaly heatwave CSVs for all perturbation
     members (keys of ANOMALY_PAIRS) and return a merged DataFrame with columns:
-    data_source, date, hw_area_km2, hw_mean_K, hw_max_K.
+    data_source, date, hw_area_km2, hw_area_anomaly_km2, hw_mean_K, hw_max_K.
+
+    ``hw_area_km2``         — absolute heatwave area in the perturbation run.
+    ``hw_area_anomaly_km2`` — area anomaly = perturbation area − matched control
+                              area (analogous to hw_mean_K / hw_max_K).
     """
     rows: list[pd.DataFrame] = []
-    for data_source in ANOMALY_PAIRS:   # only perturbation members
-        area_df = _load_hw_csv(data_source, HW_AREA_TAG, HW_AREA_COL, cfg)
-        mean_df = _load_hw_csv(data_source, HW_MEAN_TAG, HW_MEAN_COL, cfg)
-        max_df  = _load_hw_csv(data_source, HW_MAX_TAG,  HW_MAX_COL,  cfg)
+    for data_source, ctrl_source in ANOMALY_PAIRS.items():
+        area_df      = _load_hw_csv(data_source, HW_AREA_TAG, HW_AREA_COL, cfg)
+        ctrl_area_df = _load_hw_csv(ctrl_source,  HW_AREA_TAG, HW_AREA_COL, cfg)
+        mean_df      = _load_hw_csv(data_source, HW_MEAN_TAG, HW_MEAN_COL, cfg)
+        max_df       = _load_hw_csv(data_source, HW_MAX_TAG,  HW_MAX_COL,  cfg)
 
         if area_df.empty:
             continue
@@ -282,6 +285,24 @@ def load_heatwave_characteristics(cfg: Config) -> pd.DataFrame:
             HW_MEAN_COL: "hw_mean_K",
             HW_MAX_COL:  "hw_max_K",
         })
+
+        # Compute area anomaly: perturbation − matched control
+        if not ctrl_area_df.empty:
+            ctrl_area_df = ctrl_area_df.rename(
+                columns={HW_AREA_COL: "_ctrl_area_km2"}
+            )
+            merged = merged.merge(ctrl_area_df, on="date", how="left")
+            merged["hw_area_anomaly_km2"] = (
+                merged["hw_area_km2"] - merged["_ctrl_area_km2"]
+            )
+            merged = merged.drop(columns=["_ctrl_area_km2"])
+        else:
+            log.warning(
+                "Control area CSV not found for %s → hw_area_anomaly_km2 will be NaN",
+                data_source,
+            )
+            merged["hw_area_anomaly_km2"] = float("nan")
+
         merged["data_source"] = data_source
         rows.append(merged)
 
@@ -311,7 +332,7 @@ def daily_peak_load(tell_df: pd.DataFrame) -> pd.DataFrame:
     )
     return agg
 
-    
+
 # ---------------------------------------------------------------------------
 # Step 5 – Spatial filtering helpers (heatwave mask → BA overlap fractions)
 # ---------------------------------------------------------------------------
@@ -519,14 +540,18 @@ def apply_spatial_filter(
 
     Returns
     -------
-    Filtered copy of load_daily.
+    Filtered copy of load_daily with an added ``hw_area_frac`` column so that
+    downstream scripts (e.g. decompose_load_anomaly.py) can apply their own
+    stricter overlap threshold without re-running the spatial filter.
     """
     keep_mask = pd.Series(False, index=load_daily.index)
+    # Build a lookup: (member, date, BA) → hw_area_frac for all kept rows
+    frac_records: list[dict] = []
 
     for member, daily_bas in spatial_filter.items():
         for date_str, ba_frac_dict in daily_bas.items():
             # Keep only BAs whose heatwave fraction exceeds the threshold
-            affected_bas = {ba for ba, frac in ba_frac_dict.items()
+            affected_bas = {ba: frac for ba, frac in ba_frac_dict.items()
                             if frac > cfg.hw_ba_frac_threshold}
             date_val = pd.Timestamp(date_str)
             row_mask = (
@@ -535,8 +560,21 @@ def apply_spatial_filter(
                 (load_daily["BA"].isin(affected_bas))
             )
             keep_mask |= row_mask
+            for ba, frac in affected_bas.items():
+                frac_records.append({
+                    "data_source": member,
+                    "date": date_val,
+                    "BA": ba,
+                    "hw_area_frac": frac,
+                })
 
     filtered = load_daily[keep_mask].copy()
+
+    # Attach hw_area_frac so the merged CSV carries it for downstream use
+    if frac_records:
+        frac_df = pd.DataFrame(frac_records)
+        filtered = filtered.merge(frac_df, on=["data_source", "date", "BA"], how="left")
+
     log.info("Spatial filter: %d / %d rows kept (%.1f%%)",
              len(filtered), len(load_daily),
              100 * len(filtered) / max(len(load_daily), 1))
@@ -638,8 +676,8 @@ def _plot_load_anomaly_panel(
 
         ylabel = "Peak load anomaly\nvs ctrl (%)" if as_pct else "Peak load anomaly\nvs ctrl (GW)"
         ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
-        ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_title(member, fontsize=13, fontweight="bold")
+        ax.set_ylabel(ylabel, fontsize=FONTSIZE)
+        ax.set_title(member, fontsize=FONTSIZE, fontweight="bold")
 
         # Twin axis for heatwave area
         ax2 = ax.twinx()
@@ -654,7 +692,7 @@ def _plot_load_anomaly_panel(
             markersize=4,
             label="HW area",
         )
-        ax2.set_ylabel("Heatwave area\n(×10⁶ km²)", fontsize=12, color="darkred")
+        ax2.set_ylabel("Heatwave area\n(×10⁶ km²)", fontsize=FONTSIZE, color="darkred")
         ax2.tick_params(axis="y", labelcolor="darkred")
 
         # Combined legend
@@ -662,10 +700,10 @@ def _plot_load_anomaly_panel(
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax.legend(
             lines1 + lines2, labels1 + labels2,
-            fontsize=9, loc="upper left", ncol=2,
+            fontsize=FONTSIZE - 2, loc="upper left", ncol=2,
         )
 
-    axes[-1].set_xlabel("Date", fontsize=12)
+    axes[-1].set_xlabel("Date", fontsize=FONTSIZE)
     fig.autofmt_xdate(rotation=30)
 
     if as_pct:
@@ -681,7 +719,7 @@ def _plot_load_anomaly_panel(
         )
         fname = "tell_load_anomaly_timeseries_per_ba.png"
 
-    fig.suptitle(suptitle, fontsize=14, y=1.01)
+    fig.suptitle(suptitle, fontsize=FONTSIZE, y=1.01)
     fig.tight_layout()
 
     out = cfg.output_dir / fname
@@ -748,55 +786,58 @@ def _plot_ba_comparison_panel(
     fname_suffix: str = "",
     subtitle: str = "",
 ) -> None:
-    """Create a per-BA comparison figure (2 × 2 grid).
+    """Create a per-BA comparison figure — one narrow panel per BA, shared x-axis.
 
-    One subplot per BA.  Each subplot overlays one line per perturbation
-    member so the member-to-member difference for a given BA is immediately
-    visible.
+    Layout mirrors ``plot_interconnection_timeseries`` in interconnection_stress.py:
+      • One panel per BA stacked vertically in a single column.
+      • No subplot titles — the BA name is written on the y-axis instead.
+      • All panels share the x-axis; x-tick labels only on the bottom panel.
+      • y-axis is shared across panels only for the % variant (``as_pct=True``).
+      • Zero reference line on every panel.
+      • Single legend at the bottom of the figure.
+      • Tight vertical spacing (hspace = 0).
 
     Parameters
     ----------
     load_anom_daily : DataFrame with columns date, BA, data_source,
                       peak_load_anomaly, peak_load_ctrl.
-    hw_chars        : DataFrame with columns date, data_source, hw_area_km2.
-                      Accepted for API compatibility but not plotted.
-    spatial_filter  : member → {date_str → {BA_Code: hw_area_frac}}.
-                      Accepted for API compatibility but not used here.
+    hw_chars        : Accepted for API compatibility; not plotted here.
+    spatial_filter  : Accepted for API compatibility; not used here.
     as_pct          : If True plot anomaly as % of control; otherwise in GW.
-    bas             : Explicit list of BA codes to show (default: the four
-                      BAs with strongest heatwave signal — AECI, LGEE, SWPP,
-                      PJM).
-    fname_suffix    : String appended before ``.png`` to distinguish output
-                      files for different BA selections (e.g. ``_top_anomaly``).
-    subtitle        : Optional second line added to the figure suptitle to
-                      describe how the BAs were selected.
+    bas             : Explicit list of BA codes to show (default: AECI, LGEE,
+                      SWPP, PJM — four BAs with strong heatwave signal).
+    fname_suffix    : String appended before ``.png`` to distinguish outputs.
+    subtitle        : Optional subtitle line describing BA selection.
     """
-    FONTSIZE = 14
-
     FIXED_BAS: list[str] = ["AECI", "LGEE", "SWPP", "PJM"]
-    top_bas   = bas if bas is not None else FIXED_BAS
-    members   = list(ANOMALY_PAIRS)          # perturbation members only
-    member_colors = [plt.rcParams["axes.prop_cycle"].by_key()["color"][i % 10]
-                     for i in range(len(members))]
+    top_bas = bas if bas is not None else FIXED_BAS
+    members = list(ANOMALY_PAIRS)          # perturbation members only
+    n_bas   = len(top_bas)
 
-    n_rows, n_cols = 2, 2
-    fig, axes_2d = plt.subplots(
-        n_rows, n_cols,
-        figsize=(12, 8),
+    # Use MEMBER_COLORS for consistency; fall back to prop_cycle for unknowns
+    _cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    def _color(member: str, idx: int) -> str:
+        return MEMBER_COLORS.get(member, _cycle_colors[idx % len(_cycle_colors)])
+
+    y_unit = "% ctrl" if as_pct else "GW"
+
+    fig, axes = plt.subplots(
+        n_bas, 1,
+        figsize=(10, 2.2 * n_bas + 1.0),
         sharex=True,
+        sharey=as_pct,   # shared y-extent only for the % plot
+        squeeze=False,
     )
-    # Flatten to a 1-D list for easy iteration; keep only as many as we have BAs
-    axes_flat = axes_2d.flat
+    fig.subplots_adjust(hspace=0)
 
-    ylabel = "Peak load anomaly vs ctrl (%)" if as_pct else "Peak load anomaly vs ctrl (GW)"
+    legend_handles: list = []
+    legend_labels:  list = []
 
-    # legend_handles accumulates one handle per member from the first subplot
-    legend_handles: list | None = None
+    for row, ba in enumerate(top_bas):
+        ax = axes[row, 0]
 
-    for ax, ba in zip(axes_flat, top_bas):
         for i, member in enumerate(members):
-            color = member_colors[i]
-
+            color = _color(member, i)
             sub = load_anom_daily[
                 (load_anom_daily["data_source"] == member) &
                 (load_anom_daily["BA"] == ba)
@@ -812,34 +853,33 @@ def _plot_ba_comparison_panel(
                     * 100.0
                 )
             else:
-                y = sub["peak_load_anomaly"] / 1e3   # → GW
+                y = sub["peak_load_anomaly"] / 1e3   # MW → GW
 
-            ax.plot(
+            line, = ax.plot(
                 sub["date"], y,
                 color=color,
                 linewidth=1.8,
                 marker="o",
-                markersize=4,
+                markersize=3,
                 label=member,
             )
+            # Collect legend entries only from the first panel
+            if row == 0:
+                legend_handles.append(line)
+                legend_labels.append(member)
 
-        ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
-        ax.set_ylabel(ylabel, fontsize=FONTSIZE)
-        ax.set_title(f"BA: {ba}", fontsize=FONTSIZE, fontweight="bold")
-        ax.tick_params(labelsize=FONTSIZE)
+        ax.axhline(0, color="black", linewidth=0.6, linestyle="--")
+        # BA name + units as y-axis label; no subplot title
+        ax.set_ylabel(f"{ba} anomaly\n({y_unit})", fontsize=FONTSIZE, labelpad=4)
+        ax.tick_params(axis="y", labelsize=FONTSIZE)
+        ax.tick_params(axis="x", labelsize=FONTSIZE,
+                       labelbottom=(row == n_bas - 1))
+        ax.yaxis.set_major_locator(
+            plt.MaxNLocator(nbins=3, prune="both")
+        )
+        ax.spines["bottom"].set_linewidth(0.4)
 
-        # Collect handles from the first non-empty subplot for the shared legend
-        if legend_handles is None:
-            handles, labels = ax.get_legend_handles_labels()
-            if handles:
-                legend_handles = handles
-                legend_labels  = labels
-
-    # No per-subplot legends; remove x-axis labels (no "Date" title)
-    for ax in axes_2d.flat:
-        ax.xaxis.label.set_visible(False)
-
-    fig.autofmt_xdate(rotation=30)
+    axes[-1, 0].xaxis.set_tick_params(rotation=30)
 
     if as_pct:
         suptitle = "Daily peak-load anomaly as % of ctrl — per BA"
@@ -851,19 +891,15 @@ def _plot_ba_comparison_panel(
     if subtitle:
         suptitle = f"{suptitle}\n{subtitle}"
 
-    fig.suptitle(suptitle, fontsize=FONTSIZE)
-    fig.tight_layout()
-
-    # Single shared legend below all subplots
-    if legend_handles:
-        fig.legend(
-            legend_handles, legend_labels,
-            loc="lower center",
-            ncol=len(legend_handles),
-            fontsize=FONTSIZE,
-            frameon=True,
-            bbox_to_anchor=(0.5, -0.04),
-        )
+    fig.legend(
+        legend_handles, legend_labels,
+        loc="lower center",
+        ncol=min(3, len(legend_handles)),
+        fontsize=FONTSIZE,
+        frameon=True,
+        bbox_to_anchor=(0.5, -0.06),
+    )
+    fig.suptitle(suptitle, fontsize=FONTSIZE, y=0.98)
 
     out = cfg.output_dir / fname
     fig.savefig(out, bbox_inches="tight")
@@ -932,17 +968,17 @@ def plot_load_anomaly_timeseries_per_ba_comparison(
 def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
     """
     Three scatter sub-plots, one per heatwave characteristic:
-      - spatial extent   (hw_area_km2)
-      - mean intensity   (hw_mean_K)
-      - peak intensity   (hw_max_K)
+      - spatial extent anomaly  (hw_area_anomaly_km2)
+      - mean intensity          (hw_mean_K)
+      - peak intensity          (hw_max_K)
 
     Each point = one (BA × day × member).  Points are coloured by member.
     A per-member OLS trend line is added.
     """
     characteristics = [
-        ("hw_area_km2",  "Heatwave spatial extent (×10⁶ km²)", 1e6),
-        ("hw_mean_K",    "Heatwave mean intensity (K)",         1.0),
-        ("hw_max_K",     "Heatwave peak intensity (K)",         1.0),
+        ("hw_area_anomaly_km2", "Heatwave spatial extent anomaly (×10⁶ km²)", 1e6),
+        ("hw_mean_K",           "Heatwave mean intensity (K)",                  1.0),
+        ("hw_max_K",            "Heatwave peak intensity (K)",                  1.0),
     ]
 
     members = list(ANOMALY_PAIRS)   # perturbation members only
@@ -980,9 +1016,9 @@ def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
                 )
 
         ax.axhline(0, color="black", linewidth=0.8, linestyle=":")
-        ax.set_xlabel(xlabel, fontsize=12)
-        ax.set_ylabel("Peak load anomaly vs ctrl (GW)", fontsize=12)
-        ax.tick_params(labelsize=11)
+        ax.set_xlabel(xlabel, fontsize=FONTSIZE)
+        ax.set_ylabel("Peak load anomaly vs ctrl (GW)", fontsize=FONTSIZE)
+        ax.tick_params(labelsize=FONTSIZE - 1)
 
     # Single shared legend
     handles, labels = axes[0].get_legend_handles_labels()
@@ -991,16 +1027,16 @@ def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
     fig.legend(
         by_label.values(), by_label.keys(),
         loc="lower center",
-        ncol=len(members),
+        ncol=min(3, len(members)),
         bbox_to_anchor=(0.5, -0.08),
-        fontsize=12,
+        fontsize=FONTSIZE,
         frameon=True,
     )
 
     fig.suptitle(
         "Peak-load anomaly vs heatwave characteristics — July 2011\n"
         "(each point = one BA × day; dashed = OLS trend per member)",
-        fontsize=13,
+        fontsize=FONTSIZE,
     )
     fig.tight_layout()
 
@@ -1021,9 +1057,9 @@ def compute_correlations(merged: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     Returns a tidy DataFrame and saves it as a CSV.
     """
     hw_cols = {
-        "hw_area_km2": "Spatial extent",
-        "hw_mean_K":   "Mean intensity",
-        "hw_max_K":    "Peak intensity",
+        "hw_area_anomaly_km2": "Spatial extent anomaly",
+        "hw_mean_K":           "Mean intensity",
+        "hw_max_K":            "Peak intensity",
     }
     rows = []
     for member in ANOMALY_PAIRS:   # perturbation members only
@@ -1088,10 +1124,10 @@ def plot_affected_bas_per_day(
 
     ax.set_xticks(x + bar_width * (n_members - 1) / 2)
     ax.set_xticklabels([d.strftime("%m-%d") for d in dates], rotation=30)
-    ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Number of BAs under heatwave", fontsize=12)
-    ax.set_title("Heatwave-affected BAs per day (all members) — July 2011", fontsize=13)
-    ax.legend(fontsize=11)
+    ax.set_xlabel("Date", fontsize=FONTSIZE)
+    ax.set_ylabel("Number of BAs under heatwave", fontsize=FONTSIZE)
+    ax.set_title("Heatwave-affected BAs per day (all members) — July 2011", fontsize=FONTSIZE)
+    ax.legend(fontsize=FONTSIZE - 1)
     fig.tight_layout()
 
     out = cfg.output_dir / "tell_affected_bas_per_day.png"
@@ -1137,7 +1173,7 @@ def parse_args() -> argparse.Namespace:
         metavar="DIR",
         help=(
             "Directory for output figures and CSVs. "
-            f"Defaults to ensemble_output/tell_heatwave_linkage/ "
+            f"Defaults to outputs/tell_heatwave_linkage/ "
             f"relative to this script."
         ),
     )
@@ -1202,15 +1238,29 @@ def main() -> None:
     filter_csv = cfg.output_dir / "tell_heatwave_affected_bas.csv"
 
     if filter_csv.exists():
-        # ── Fast path: load from cache ──────────────────────────────────────
-        # Guard against old-format CSVs that lack the hw_area_frac column.
+        # ── Validate cached spatial filter ──────────────────────────────────
         _probe = pd.read_csv(filter_csv, nrows=0)
+        # Guard 1: old-format CSV that lacks the hw_area_frac column.
         if "hw_area_frac" not in _probe.columns:
             log.warning(
                 "Cached spatial filter %s is missing column 'hw_area_frac' "
                 "(old format) — deleting and recomputing.", filter_csv
             )
             filter_csv.unlink()
+        else:
+            # Guard 2: cached CSV was built with a different (smaller) member
+            # set — e.g. new ensemble members have been added since the last
+            # run.  Any member in TELL_MEMBER_DIRS that is absent from the
+            # cache means we must rebuild.
+            _cached_members = set(pd.read_csv(filter_csv, usecols=["data_source"])["data_source"])
+            _expected_members = set(all_members)
+            _missing = _expected_members - _cached_members
+            if _missing:
+                log.warning(
+                    "Cached spatial filter is missing members %s — "
+                    "deleting and recomputing.", sorted(_missing)
+                )
+                filter_csv.unlink()
 
     if filter_csv.exists():
         log.info(
@@ -1250,6 +1300,14 @@ def main() -> None:
     log.info("Merging filtered load anomaly with heatwave characteristics …")
     merged = load_daily_filtered.merge(hw_chars, on=["date", "data_source"], how="inner")
     log.info("Merged dataset: %d rows (BA × day × member)", len(merged))
+
+    # Save full (unfiltered) daily peak-load anomaly for downstream analysis
+    # (needed by mean-shift decomposition in mean_shift_decompose.py)
+    load_daily_csv = cfg.output_dir / "tell_load_daily_all.csv"
+    load_daily[load_daily["data_source"].isin(perturbation_members)].to_csv(
+        load_daily_csv, index=False
+    )
+    log.info("Full daily load saved → %s", load_daily_csv)
 
     # Save merged table for further analysis
     merged_csv = cfg.output_dir / "tell_heatwave_merged.csv"

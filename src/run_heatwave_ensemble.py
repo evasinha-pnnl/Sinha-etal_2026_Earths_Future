@@ -17,8 +17,12 @@ Five members are currently defined:
   ─────────────────     ───────────────────────────
   EAMxx_ctrl            heatwave_201107/
   EAMxx_ctrl_p12        heatwave_201107_p12/
+  EAMxx_ctrl_p24        heatwave_201107_p24/
+  EAMxx_ctrl_n24        heatwave_201107_n24/
   EAMxx_SSP245          heatwave_201107_SSP245/
   EAMxx_SSP245_p12      heatwave_201107_SSP245_p12/
+  EAMxx_SSP245_p24      heatwave_201107_SSP245_p24/
+  EAMxx_SSP245_n24      heatwave_201107_SSP245_n24/
 
   EAMxx members share:
     • fname_abb  = output.eamxx.INSTANT.nsteps_x9.
@@ -27,7 +31,7 @@ Five members are currently defined:
 
 Output
 ------
-  ensemble_output/
+  outputs/
     <data_source>/   ← plots and CSVs written directly here (no figures/ subfolder)
 
 Usage
@@ -84,7 +88,7 @@ log = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 EAMXX_BASE_PATH = "/pscratch/sd/j/jli628/EAMxx_regridding/"
-OUTPUT_BASE_DIR = Path(__file__).parent / "ensemble_output"
+OUTPUT_BASE_DIR = Path(__file__).parent / "outputs"
 
 # ---------------------------------------------------------------------------
 # Ensemble member definitions
@@ -153,12 +157,28 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         subdir      = "heatwave_201107_p12/",
     ),
     EnsembleMember(
+        data_source = "EAMxx_ctrl_p24",
+        subdir      = "heatwave_201107_p24/",
+    ),
+    EnsembleMember(
+        data_source = "EAMxx_ctrl_n24",
+        subdir      = "heatwave_201107_n24/",
+    ),
+    EnsembleMember(
         data_source = "EAMxx_SSP245",
         subdir      = "heatwave_201107_SSP245/",
     ),
     EnsembleMember(
         data_source = "EAMxx_SSP245_p12",
         subdir      = "heatwave_201107_SSP245_p12/",
+    ),
+    EnsembleMember(
+        data_source = "EAMxx_SSP245_p24",
+        subdir      = "heatwave_201107_SSP245_p24/",
+    ),
+    EnsembleMember(
+        data_source = "EAMxx_SSP245_n24",
+        subdir      = "heatwave_201107_SSP245_n24/",
     ),
 ]
 
