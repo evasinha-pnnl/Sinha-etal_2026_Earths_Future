@@ -91,7 +91,7 @@ ANALYSIS_CONFIG = dict(
 )
 
 PERCENTILE_VALUE = 0.9          # 90th percentile threshold
-FIG_EXTENT = [235, 294, 24, 54] # [lon_min, lon_max, lat_min, lat_max]
+FIG_EXTENT = [235, 294, 24, 47] # [lon_min, lon_max, lat_min, lat_max]
 FIG_WT, FIG_HT = 14, 9          # figure width / height
 
 # Diagnostic grid cells for console checks (land vs. ocean)

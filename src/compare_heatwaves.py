@@ -16,7 +16,7 @@ Output plots are written to:
 
 Notes
 -----
-ERA5_obs covers the full month (days 1–31); EAMxx members cover days 17–24.
+ERA5_obs covers the full month (days 1-31); EAMxx members cover days 17-24.
 Both are plotted on the same day-of-year x-axis.  ERA5_obs is drawn as a
 dashed line so it is visually distinct from the EAMxx ensemble members.
 
@@ -43,6 +43,7 @@ import pandas as pd
 
 # Reuse member definitions and output path from the ensemble runner
 from run_heatwave_ensemble import ENSEMBLE_MEMBERS, OUTPUT_BASE_DIR
+from util_constants import MEMBER_COLORS, ANOMALY_PAIRS, FONTSIZE, sorted_member_order, display_name
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -75,20 +76,22 @@ _XAXIS_MAX = datetime.date(_eamxx_yr, _eamxx_mon, max(m.day_end   for m in _eamx
 # Timeseries metrics to compare
 # ---------------------------------------------------------------------------
 class TimeseriesMetric(NamedTuple):
-    csv_tag:      str   # tag in the CSV filename
-    value_col:    str   # column to plot on the y-axis
-    ylabel:       str   # y-axis label
-    title:        str   # plot title
-    out_fname_tag: str  # stem of the output PNG filename
+    csv_tag:      str    # tag in the CSV filename
+    value_col:    str    # column to plot on the y-axis
+    ylabel:       str    # y-axis label
+    title:        str    # plot title
+    out_fname_tag: str   # stem of the output PNG filename
+    scale:        float = 1.0   # multiply values by this before plotting
 
 
 TIMESERIES_METRICS: list[TimeseriesMetric] = [
     TimeseriesMetric(
         csv_tag       = "largest_contiguous_heatwave_area_timeseries",
         value_col     = "largest_region_area_km2",
-        ylabel        = "Heatwave area (km²)",
+        ylabel        = "Largest contiguous heatwave area\n(million km²)",
         title         = "Largest contiguous heatwave area",
         out_fname_tag = "largest_contiguous_heatwave_area_comparison",
+        scale         = 1e-6,   # km² → million km²
     ),
     TimeseriesMetric(
         csv_tag       = "mean_anomaly_largest_contiguous_heatwave_area_timeseries",
@@ -154,64 +157,103 @@ def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m") -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-def plot_comparison(metric: TimeseriesMetric, varnames: str = "t2m") -> None:
+def plot_comparison(
+    metric: TimeseriesMetric,
+    varnames: str = "t2m",
+    show_obs: bool = True,
+) -> None:
     """
     Load CSVs for all members and save a multi-member comparison line plot.
 
-    ERA5_obs is drawn as a dashed line to distinguish the observational
-    baseline from the EAMxx PGW ensemble members (solid lines).
+    Styling rules
+    -------------
+    * **Observation** (ERA5_obs): thick solid black line (when show_obs=True).
+    * **PGW members** (EAMxx_SSP245*): solid line.
+    * **Control members** (EAMxx_ctrl*): dashed line.
+    * Each ctrl/PGW anomaly pair shares the same colour (from MEMBER_COLORS).
+
+    Parameters
+    ----------
+    metric    : TimeseriesMetric — metric to plot.
+    varnames  : str              — variable name used in filenames (default 't2m').
+    show_obs  : bool             — whether to include ERA5_obs in the plot
+                                   (default True).
     """
     df = load_ensemble_csvs(metric.csv_tag, varnames)
 
-    # Split into obs and model members
-    df_obs   = df[df["Data_Source"] == OBS_LABEL]
-    df_model = df[df["Data_Source"] != OBS_LABEL]
+    # Apply optional unit scaling (e.g. km² → million km²)
+    if metric.scale != 1.0:
+        df = df.copy()
+        df[metric.value_col] = df[metric.value_col] * metric.scale
+
+    # ctrl members are those NOT in ANOMALY_PAIRS (PGW) and NOT obs
+    _pgw_members  = set(ANOMALY_PAIRS.keys())
+    _ctrl_members = set(ANOMALY_PAIRS.values())
+
+    # Colour: PGW member uses MEMBER_COLORS directly;
+    #         ctrl member uses the colour of its paired PGW member
+    def _color(src: str) -> str:
+        if src in MEMBER_COLORS:
+            return MEMBER_COLORS[src]
+        return "#333333"
 
     fig, ax = plt.subplots(figsize=(11, 6))
 
-    # --- plot EAMxx members (solid lines) -----------------------------------
-    model_sources = df_model["Data_Source"].unique()
-    color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    for i, src in enumerate(model_sources):
-        sub = df_model[df_model["Data_Source"] == src]
+    # ── EAMxx members ────────────────────────────────────────────────────────
+    # Build order: ctrl_0, PGW_0, ctrl_1, PGW_1, … so that the 4-column
+    # legend reads "ctrl row" on top and "PGW row" on the bottom.
+    _all_model = {
+        m.data_source for m in ENSEMBLE_MEMBERS if m.data_source != OBS_LABEL
+    }
+    model_sources = sorted_member_order(_all_model)
+    for src in model_sources:
+        sub = df[df["Data_Source"] == src]
+        if sub.empty:
+            continue
+        is_ctrl = src in _ctrl_members
         ax.plot(
             sub["date"], sub[metric.value_col],
-            label=src,
-            color=color_cycle[i % len(color_cycle)],
+            label=display_name(src),
+            color=_color(src),
             linewidth=2,
+            linestyle="--" if is_ctrl else "-",
         )
 
-    # --- plot ERA5_obs (dashed black line) ----------------------------------
-    if not df_obs.empty:
-        ax.plot(
-            df_obs["date"], df_obs[metric.value_col],
-            label=OBS_LABEL,
-            color="black",
-            linewidth=2,
-            linestyle="--",
-        )
+    # ── ERA5_obs ─────────────────────────────────────────────────────────────
+    if show_obs:
+        df_obs = df[df["Data_Source"] == OBS_LABEL]
+        if not df_obs.empty:
+            ax.plot(
+                df_obs["date"], df_obs[metric.value_col],
+                label=display_name(OBS_LABEL),
+                color="black",
+                linewidth=3,
+                linestyle="-",
+            )
 
-    ax.set_xlabel("Date", fontsize=14)
-    ax.set_ylabel(metric.ylabel, fontsize=14)
-    ax.set_title(metric.title, fontsize=15)
+    #ax.set_xlabel("Date", fontsize=FONTSIZE)
+    ax.set_ylabel(metric.ylabel, fontsize=FONTSIZE)
     ax.set_xlim(_XAXIS_MIN, _XAXIS_MAX)
     ax.xaxis.set_major_locator(mdates.DayLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
     fig.autofmt_xdate(rotation=30)
-    ax.tick_params(labelsize=13)
+    ax.tick_params(labelsize=FONTSIZE - 1)
+
     n_sources = len(df["Data_Source"].unique())
     ax.legend(
         loc="upper center",
-        ncol=min(4, n_sources),
-        bbox_to_anchor=(0.5, -0.15),
+        ncol=min(5, n_sources),
+        bbox_to_anchor=(0.5, -0.2),
         frameon=True,
-        fontsize=13,
+        fontsize=FONTSIZE - 1,
     )
 
     out_path = COMPARISON_DIR / f"{metric.out_fname_tag}.png"
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved comparison plot → %s", out_path)
+    out_csv = COMPARISON_DIR / f"{metric.out_fname_tag}.csv"
+    df.to_csv(out_csv, index=False)
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +261,7 @@ def main() -> None:
     COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
 
     for metric in TIMESERIES_METRICS:
-        plot_comparison(metric)
+        plot_comparison(metric, show_obs=False)
 
     log.info("All comparison plots written to %s", COMPARISON_DIR)
 

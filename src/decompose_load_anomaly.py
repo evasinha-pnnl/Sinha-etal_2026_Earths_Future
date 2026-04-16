@@ -100,7 +100,7 @@ DEFAULT_MERGED_CSV = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage" / "tell_heatwave
 DEFAULT_OUTPUT_DIR = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
 
 # Perturbation members to analyse (must match data_source values in merged CSV)
-PERTURBATION_MEMBERS: list[str] = ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n24"]
+PERTURBATION_MEMBERS: list[str] = ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n12", "EAMxx_SSP245_n24"]
 
 # Heatwave predictors: (column_name, display_label, scale_for_display)
 PREDICTORS: list[tuple[str, str, float]] = [
@@ -114,6 +114,7 @@ MEMBER_COLORS: dict[str, str] = {
     "EAMxx_SSP245":      "#2ca02c",   # green
     "EAMxx_SSP245_p12":  "#d62728",   # red
     "EAMxx_SSP245_p24":  "#9467bd",   # purple
+    "EAMxx_SSP245_n12":  "#7f7f7f",   # gray
     "EAMxx_SSP245_n24":  "#8c564b",   # brown
 }
 

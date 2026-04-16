@@ -18,10 +18,12 @@ Five members are currently defined:
   EAMxx_ctrl            heatwave_201107/
   EAMxx_ctrl_p12        heatwave_201107_p12/
   EAMxx_ctrl_p24        heatwave_201107_p24/
+  EAMxx_ctrl_n12        heatwave_201107_n12/
   EAMxx_ctrl_n24        heatwave_201107_n24/
   EAMxx_SSP245          heatwave_201107_SSP245/
   EAMxx_SSP245_p12      heatwave_201107_SSP245_p12/
   EAMxx_SSP245_p24      heatwave_201107_SSP245_p24/
+  EAMxx_SSP245_n12      heatwave_201107_SSP245_n12/
   EAMxx_SSP245_n24      heatwave_201107_SSP245_n24/
 
   EAMxx members share:
@@ -161,6 +163,10 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         subdir      = "heatwave_201107_p24/",
     ),
     EnsembleMember(
+        data_source = "EAMxx_ctrl_n12",
+        subdir      = "heatwave_201107_n12/",
+    ),
+    EnsembleMember(
         data_source = "EAMxx_ctrl_n24",
         subdir      = "heatwave_201107_n24/",
     ),
@@ -175,6 +181,10 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
     EnsembleMember(
         data_source = "EAMxx_SSP245_p24",
         subdir      = "heatwave_201107_SSP245_p24/",
+    ),
+    EnsembleMember(
+        data_source = "EAMxx_SSP245_n12",
+        subdir      = "heatwave_201107_SSP245_n12/",
     ),
     EnsembleMember(
         data_source = "EAMxx_SSP245_n24",

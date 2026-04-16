@@ -65,7 +65,7 @@ def xr_plot_US(da_plot, stats, cmap_col, title, fig_wt, fig_ht, fig_extent, show
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
     fig = plt.figure(figsize=(fig_wt, fig_ht))
-    ax  = fig.add_axes([0.1, 0.1, 0.8, 0.8], projection = ccrs.LambertConformal(central_longitude=-95, central_latitude=37.5))
+    ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
 
     # spatial plot using xarray
     fg = da_plot.plot(ax          = ax, 
@@ -126,6 +126,11 @@ def xr_plot_US(da_plot, stats, cmap_col, title, fig_wt, fig_ht, fig_extent, show
 
     # Define map extent
     ax.set_extent(fig_extent)
+
+    # Allow the axes to fill the figure rather than being constrained to the
+    # geographic aspect ratio imposed by Cartopy.  This makes fig_wt / fig_ht
+    # actually control the output shape.
+    ax.set_aspect('auto')
 
     plt.savefig(out_path, bbox_inches='tight')
 

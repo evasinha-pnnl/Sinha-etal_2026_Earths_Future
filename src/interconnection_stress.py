@@ -59,6 +59,7 @@ tell_interconnection_load_absolute_timeseries.png
     SSP245 pert (solid),     SSP245 ctrl (dashed),
     SSP245_p12 pert (solid), SSP245_p12 ctrl (dashed).
     SSP245_p24 pert (solid), SSP245_p24 ctrl (dashed).
+    SSP245_n12 pert (solid), SSP245_n12 ctrl (dashed).
     SSP245_n24 pert (solid), SSP245_n24 ctrl (dashed).
     Y-axis = absolute peak load in GW.
 
@@ -91,10 +92,13 @@ from pathlib import Path
 
 import matplotlib as mpl
 mpl.use("Agg")
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
+
+from util_constants import ANOMALY_PAIRS, FONTSIZE, MEMBER_COLORS, PERTURBATION_MEMBERS, sorted_member_order, display_name
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -125,28 +129,9 @@ IC_COLORS: dict[str, str] = {
     "ERCOT": "#9467bd",   # purple
 }
 
-# Perturbation → matched control pairs (must match analyze_tell_heatwave.py)
-ANOMALY_PAIRS: dict[str, str] = {
-    "EAMxx_SSP245":      "EAMxx_ctrl",
-    "EAMxx_SSP245_p12":  "EAMxx_ctrl_p12",
-    "EAMxx_SSP245_p24":  "EAMxx_ctrl_p24",
-    "EAMxx_SSP245_n24":  "EAMxx_ctrl_n24",
-}
-PERTURBATION_MEMBERS: list[str] = list(ANOMALY_PAIRS.keys())
-
 # Line styles for pert vs ctrl
 PERT_LS  = "-"
 CTRL_LS  = "--"
-
-# Member display colours (pert only — ctrl drawn in same colour but dashed)
-MEMBER_COLORS: dict[str, str] = {
-    "EAMxx_SSP245":      "#2ca02c",   # green
-    "EAMxx_SSP245_p12":  "#d62728",   # red
-    "EAMxx_SSP245_p24":  "#9467bd",   # purple
-    "EAMxx_SSP245_n24":  "#8c564b",   # brown
-}
-
-FONTSIZE = 14
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -271,7 +256,7 @@ def plot_interconnection_timeseries(
 
     fig, axes = plt.subplots(
         n_ics, 1,
-        figsize=(10, 2.2 * n_ics + 1.0),
+        figsize=(10, 2.5 * n_ics + 1.2),
         sharex=True,
         sharey=as_pct,   # shared y-axis only for the % plot
         squeeze=False,
@@ -287,9 +272,9 @@ def plot_interconnection_timeseries(
 
         for pert, ctrl in ANOMALY_PAIRS.items():
             color = MEMBER_COLORS.get(pert, "grey")
-            for member, ls, lw, alpha, suffix in [
-                (pert, PERT_LS,  2.0, 1.0, " (pert)"),
-                (ctrl, CTRL_LS,  1.4, 0.7, " (ctrl)"),
+            for member, ls, lw, alpha in [
+                (pert, PERT_LS,  2.0, 1.0),
+                (ctrl, CTRL_LS,  1.4, 0.7),
             ]:
                 msub = sub[sub["data_source"] == member]
                 if msub.empty:
@@ -298,16 +283,16 @@ def plot_interconnection_timeseries(
                     msub["date"], msub[y_col],
                     color=color, linestyle=ls, linewidth=lw, alpha=alpha,
                     marker="o", markersize=3,
-                    label=f"{member}{suffix}",
+                    label=display_name(member),
                 )
                 # Collect legend entries only from the first panel
                 if row == 0:
                     legend_handles.append(line)
-                    legend_labels.append(f"{member}{suffix}")
+                    legend_labels.append(display_name(member))
 
         ax.axhline(0, color="black", linewidth=0.6, linestyle=":")
         # IC name + units on the y-axis instead of a subplot title
-        ax.set_ylabel(f"{ic} anomaly\n({y_unit})", fontsize=FONTSIZE, labelpad=4)
+        ax.set_ylabel(f"{ic} peak-load\nanomaly ({y_unit})", fontsize=FONTSIZE, labelpad=4)
         ax.tick_params(axis="y", labelsize=FONTSIZE)
         ax.tick_params(axis="x", labelsize=FONTSIZE,
                        labelbottom=(row == n_ics - 1))
@@ -324,16 +309,16 @@ def plot_interconnection_timeseries(
     fig.legend(
         legend_handles, legend_labels,
         loc="lower center",
-        ncol=min(2, len(legend_handles)),
+        ncol=min(3, len(legend_handles)),
         fontsize=FONTSIZE,
         frameon=True,
         bbox_to_anchor=(0.5, -0.12),
     )
-    fig.suptitle(
-        "Daily peak-load anomaly by interconnection",
-        fontsize=FONTSIZE,
-        y=0.98,
-    )
+    #fig.suptitle(
+    #    "Daily peak-load anomaly by interconnection",
+    #    fontsize=FONTSIZE,
+    #    y=0.98,
+    #)
     fig.savefig(output_dir / fname, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", output_dir / fname)
@@ -353,8 +338,10 @@ def plot_interconnection_absolute_timeseries(
       - SSP245_p12 control      (dashed, red)
       - SSP245_p24 perturbation (solid,  blue)
       - SSP245_p24 control      (dashed, blue)
-      - SSP245_n24 perturbation (solid,  blue)
-      - SSP245_n24 control      (dashed, blue)
+      - SSP245_n12 perturbation (solid,  gray)
+      - SSP245_n12 control      (dashed, gray)
+      - SSP245_n24 perturbation (solid,  brown)
+      - SSP245_n24 control      (dashed, brown)
 
     Layout mirrors the reference image:
       • No subplot titles — interconnection name written on the y-axis.
@@ -379,7 +366,7 @@ def plot_interconnection_absolute_timeseries(
 
     fig, axes = plt.subplots(
         n_ics, 1,
-        figsize=(10, 2.2 * n_ics + 1.0),
+        figsize=(10, 2.5 * n_ics + 1.2),
         sharex=True,
         squeeze=False,
     )
@@ -398,21 +385,21 @@ def plot_interconnection_absolute_timeseries(
             if m_pert.empty:
                 continue
 
-            line_pert, = ax.plot(
-                m_pert["date"], m_pert["sum_load_GW"],
-                color=color, linestyle=PERT_LS, linewidth=2.0, alpha=1.0,
-                marker="o", markersize=3,
-                label=f"{pert} (pert)",
-            )
             line_ctrl, = ax.plot(
                 m_pert["date"], m_pert["sum_ctrl_GW"],
                 color=color, linestyle=CTRL_LS, linewidth=1.4, alpha=0.7,
                 marker="o", markersize=3,
-                label=f"{ctrl} (ctrl)",
+                label=display_name(ctrl),
+            )
+            line_pert, = ax.plot(
+                m_pert["date"], m_pert["sum_load_GW"],
+                color=color, linestyle=PERT_LS, linewidth=2.0, alpha=1.0,
+                marker="o", markersize=3,
+                label=display_name(pert),
             )
             if row == 0:
-                legend_handles += [line_pert, line_ctrl]
-                legend_labels  += [f"{pert} (pert)", f"{ctrl} (ctrl)"]
+                legend_handles += [line_ctrl, line_pert]
+                legend_labels  += [display_name(ctrl), display_name(pert)]
 
         # IC name + units as y-axis label; no subplot title
         ax.set_ylabel(f"{ic} (GW)", fontsize=FONTSIZE, labelpad=4)
@@ -427,7 +414,7 @@ def plot_interconnection_absolute_timeseries(
     fig.legend(
         legend_handles, legend_labels,
         loc="lower center",
-        ncol=min(2, len(legend_handles)),
+        ncol=min(3, len(legend_handles)),
         fontsize=FONTSIZE,
         frameon=True,
         bbox_to_anchor=(0.5, -0.16),
@@ -489,40 +476,34 @@ def plot_cooccurrence(
 
     Output: tell_interconnection_cooccurrence.png
     """
-    all_members = cooc_df["data_source"].unique().tolist()
+    all_members = sorted_member_order(set(cooc_df["data_source"].unique()))
     dates = sorted(cooc_df["date"].unique())
     n_dates   = len(dates)
     n_members = len(all_members)
     bar_width = 0.8 / n_members
     x         = np.arange(n_dates)
-    date_labels = [pd.Timestamp(d).strftime("%b %d") for d in dates]
+    date_labels = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in dates]
 
-    # Assign colours: pert members use MEMBER_COLORS, ctrl members use
-    # the same colour with lower alpha (handled via hatch instead)
-    def _bar_style(member: str) -> dict:
-        if member in MEMBER_COLORS:
-            return dict(color=MEMBER_COLORS[member], alpha=0.85, hatch="")
-        # Find matching pert colour
-        for pert, ctrl in ANOMALY_PAIRS.items():
-            if member == ctrl:
-                return dict(color=MEMBER_COLORS[pert], alpha=0.4, hatch="//")
-        return dict(color="grey", alpha=0.6, hatch="")
+    _ctrl_members = set(ANOMALY_PAIRS.values())
 
-    fig, ax = plt.subplots(figsize=(max(10, n_dates * 1.2), 5))
+    fig, ax = plt.subplots(figsize=(max(10, n_dates * 1.2), 7))
 
     for i, member in enumerate(all_members):
-        style  = _bar_style(member)
         m_sub  = cooc_df[cooc_df["data_source"] == member].set_index("date")
         counts = [int(m_sub.loc[d, "n_stressed"]) if d in m_sub.index else 0
                   for d in dates]
         x_pos  = x + (i - (n_members - 1) / 2.0) * bar_width
+        is_ctrl   = member in _ctrl_members
+        base_color = MEMBER_COLORS.get(member, "grey")
+        rgba = (*mcolors.to_rgb(base_color), 0.35 if is_ctrl else 0.85)
         ax.bar(
             x_pos, counts,
             width=bar_width * 0.9,
-            label=member,
-            edgecolor="white",
-            linewidth=0.4,
-            **style,
+            label=display_name(member),
+            facecolor=rgba,
+            edgecolor=base_color if is_ctrl else "white",
+            linewidth=0.8,
+            hatch="//" if is_ctrl else "",
         )
 
     ax.set_xticks(x)
@@ -530,11 +511,10 @@ def plot_cooccurrence(
     ax.set_yticks(range(len(INTERCONNECTIONS) + 1))
     ax.set_yticklabels([str(n) for n in range(len(INTERCONNECTIONS) + 1)],
                        fontsize=FONTSIZE)
-    ax.set_ylabel("# interconnections stressed\nsimultaneously", fontsize=FONTSIZE)
+    ax.set_ylabel("# interconnections stressed simultaneously", fontsize=FONTSIZE)
     ax.set_title(
         f"Daily co-occurrence of stressed interconnections\n"
-        f"Threshold: load anomaly > {stress_threshold_gw:.1f} GW  |  July 2011\n"
-        f"Solid = perturbation  |  Hatched = control",
+        f"Threshold: load anomaly > {stress_threshold_gw:.1f} GW  |  July 2011\n",
         fontsize=FONTSIZE,
     )
     ax.legend(fontsize=FONTSIZE, loc="upper right", frameon=True)
@@ -568,7 +548,7 @@ def plot_cooccurrence_heatmap(
     n_members = len(pert_members)
     fig, axes = plt.subplots(
         1, n_members,
-        figsize=(7 * n_members, 2.5 + len(ics) * 0.6),
+        figsize=(6 * n_members, 3.0 + len(ics) * 0.9),
         squeeze=False,
     )
 
@@ -617,7 +597,7 @@ def plot_cooccurrence_heatmap(
                            fontsize=FONTSIZE)
         ax.set_yticks(range(len(ics)))
         ax.set_yticklabels(ics, fontsize=FONTSIZE)
-        ax.set_title(member, fontsize=FONTSIZE, fontweight="bold")
+        ax.set_title(display_name(member), fontsize=FONTSIZE, fontweight="bold")
 
     fig.suptitle(
         "Interconnection-level load anomaly (GW) per day\n"

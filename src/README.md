@@ -73,12 +73,14 @@ pip install -r requirements.txt
 | Label | Subdirectory | Description |
 |-------|-------------|-------------|
 | `EAMxx_ctrl` | `heatwave_201107/` | Present-day control |
-| `EAMxx_ctrl_p12` | `heatwave_201107_p12/` | Present-day control +1.2 K |
-| `EAMxx_ctrl_p24` | `heatwave_201107_p24/` | Present-day control +1.2 K |
-| `EAMxx_ctrl_n24` | `heatwave_201107_n24/` | Present-day control +1.2 K |
+| `EAMxx_ctrl_p12` | `heatwave_201107_p12/` | Present-day control|
+| `EAMxx_ctrl_p24` | `heatwave_201107_p24/` | Present-day control|
+| `EAMxx_ctrl_n12` | `heatwave_201107_n12/` | Present-day control|
+| `EAMxx_ctrl_n24` | `heatwave_201107_n24/` | Present-day control|
 | `EAMxx_SSP245` | `heatwave_201107_SSP245/` | SSP2-4.5 perturbation |
 | `EAMxx_SSP245_p12` | `heatwave_201107_SSP245_p12/` | SSP2-4.5 +1.2 K perturbation |
 | `EAMxx_SSP245_p24` | `heatwave_201107_SSP245_p24/` | SSP2-4.5 +1.2 K perturbation |
+| `EAMxx_SSP245_n12` | `heatwave_201107_SSP245_n12/` | SSP2-4.5 +1.2 K perturbation |
 | `EAMxx_SSP245_n24` | `heatwave_201107_SSP245_n24/` | SSP2-4.5 +1.2 K perturbation |
 
 ---

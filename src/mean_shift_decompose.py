@@ -150,7 +150,7 @@ DEFAULT_OUTPUT_DIR = _LINKAGE_DIR
 DEFAULT_HW_FRAC_THRESHOLD = 0.0
 
 # Perturbation members to analyse
-PERTURBATION_MEMBERS: list[str] = ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n24"]
+PERTURBATION_MEMBERS: list[str] = ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n12", "EAMxx_SSP245_n24"]
 
 # Number of top BAs to show in summary plots (ranked by mean total anomaly)
 N_TOP_BAS = 8
@@ -160,6 +160,7 @@ MEMBER_COLORS: dict[str, str] = {
     "EAMxx_SSP245":      "#2ca02c",   # green
     "EAMxx_SSP245_p12":  "#d62728",   # red
     "EAMxx_SSP245_p24":  "#9467bd",   # purple
+    "EAMxx_SSP245_n12":  "#7f7f7f",   # gray
     "EAMxx_SSP245_n24":  "#8c564b",   # brown
 }
 

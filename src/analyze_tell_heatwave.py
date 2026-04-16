@@ -47,6 +47,7 @@ from pathlib import Path
 
 import matplotlib as mpl
 mpl.use("Agg")
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -64,7 +65,7 @@ from run_heatwave_ensemble import (
     EAMXX_BASE_PATH,
     _MEMBER_LOOKUP,
 )
-from util_constants import ANOMALY_PAIRS, FONTSIZE, MEMBER_COLORS
+from util_constants import ANOMALY_PAIRS, FONTSIZE, MEMBER_COLORS, sorted_member_order, display_name
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -92,10 +93,12 @@ TELL_MEMBER_DIRS: dict[str, str] = {
     "EAMxx_ctrl":        "EAMxx",
     "EAMxx_ctrl_p12":    "EAMxx_p12",
     "EAMxx_ctrl_p24":    "EAMxx_p24",
+    "EAMxx_ctrl_n12":    "EAMxx_n12",
     "EAMxx_ctrl_n24":    "EAMxx_n24",
     "EAMxx_SSP245":      "EAMxx_SSP245",
     "EAMxx_SSP245_p12":  "EAMxx_SSP245_p12",
     "EAMxx_SSP245_p24":  "EAMxx_SSP245_p24",
+    "EAMxx_SSP245_n12":  "EAMxx_SSP245_n12",
     "EAMxx_SSP245_n24":  "EAMxx_SSP245_n24",
 }
 
@@ -206,6 +209,7 @@ def compute_load_anomaly(tell_df: pd.DataFrame) -> pd.DataFrame:
         EAMxx_SSP245     − EAMxx_ctrl
         EAMxx_SSP245_p12 − EAMxx_ctrl_p12
         EAMxx_SSP245_p24 − EAMxx_ctrl_p24
+        EAMxx_SSP245_n12 − EAMxx_ctrl_n12
         EAMxx_SSP245_n24 − EAMxx_ctrl_n24
 
     Returns only the perturbation rows with an added ``load_anomaly`` column.
@@ -581,7 +585,7 @@ def apply_spatial_filter(
     return filtered
 
 # ---------------------------------------------------------------------------
-# Step 7a – Time-series panel: peak-load anomaly + heatwave area
+# Step 7a – Per-BA comparison: subplots per BA, lines per member
 # ---------------------------------------------------------------------------
 def _top_bas_by_hw_frac(
     spatial_filter: dict[str, dict[str, dict[str, float]]],
@@ -607,154 +611,6 @@ def _top_bas_by_hw_frac(
     return top
 
 
-def _plot_load_anomaly_panel(
-    load_anom_daily: pd.DataFrame,
-    hw_chars: pd.DataFrame,
-    spatial_filter: dict[str, dict[str, dict[str, float]]],
-    cfg: Config,
-    *,
-    as_pct: bool = False,
-    n_top_bas: int = 5,
-) -> None:
-    """Create one time-series panel figure.
-
-    One subplot per perturbation member.  Each subplot shows a line per
-    top-BA (ranked by mean heatwave-area fraction), with heatwave area
-    on a twin y-axis.
-
-    Parameters
-    ----------
-    load_anom_daily : DataFrame with date, BA, data_source, peak_load_anomaly,
-                      peak_load_ctrl columns.
-    hw_chars        : DataFrame with date, data_source, hw_area_km2.
-    spatial_filter  : member → {date_str → {BA_Code: hw_area_frac}}.
-    as_pct          : If True, anomaly as % of control; otherwise in GW.
-    n_top_bas       : Number of top BAs to show (default 5).
-    """
-    members   = list(ANOMALY_PAIRS)
-    top_bas   = _top_bas_by_hw_frac(spatial_filter, members, n=n_top_bas)
-    if not top_bas:
-        log.warning("No top BAs found; skipping timeseries panel plot.")
-        return
-
-    n_members = len(members)
-    fig, axes = plt.subplots(n_members, 1, figsize=(12, 4 * n_members), sharex=True)
-    if n_members == 1:
-        axes = [axes]
-
-    ba_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-
-    for ax, member in zip(axes, members):
-        sub = load_anom_daily[
-            (load_anom_daily["data_source"] == member) &
-            (load_anom_daily["BA"].isin(top_bas))
-        ].copy()
-        hw = hw_chars[hw_chars["data_source"] == member][["date", "hw_area_km2"]]
-
-        for j, ba in enumerate(top_bas):
-            ba_sub = sub[sub["BA"] == ba].sort_values("date")
-            if ba_sub.empty:
-                continue
-
-            if as_pct:
-                y = (
-                    ba_sub["peak_load_anomaly"]
-                    / ba_sub["peak_load_ctrl"].replace(0, np.nan)
-                    * 100.0
-                )
-            else:
-                y = ba_sub["peak_load_anomaly"] / 1e3   # → GW
-
-            ax.plot(
-                ba_sub["date"], y,
-                color=ba_colors[j % len(ba_colors)],
-                linewidth=1.8,
-                marker="o",
-                markersize=4,
-                label=ba,
-            )
-
-        ylabel = "Peak load anomaly\nvs ctrl (%)" if as_pct else "Peak load anomaly\nvs ctrl (GW)"
-        ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
-        ax.set_ylabel(ylabel, fontsize=FONTSIZE)
-        ax.set_title(member, fontsize=FONTSIZE, fontweight="bold")
-
-        # Twin axis for heatwave area
-        ax2 = ax.twinx()
-        hw_sorted = hw.sort_values("date")
-        ax2.plot(
-            hw_sorted["date"],
-            hw_sorted["hw_area_km2"] / 1e6,
-            color="darkred",
-            linewidth=2,
-            linestyle="--",
-            marker="s",
-            markersize=4,
-            label="HW area",
-        )
-        ax2.set_ylabel("Heatwave area\n(×10⁶ km²)", fontsize=FONTSIZE, color="darkred")
-        ax2.tick_params(axis="y", labelcolor="darkred")
-
-        # Combined legend
-        lines1, labels1 = ax.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax.legend(
-            lines1 + lines2, labels1 + labels2,
-            fontsize=FONTSIZE - 2, loc="upper left", ncol=2,
-        )
-
-    axes[-1].set_xlabel("Date", fontsize=FONTSIZE)
-    fig.autofmt_xdate(rotation=30)
-
-    if as_pct:
-        suptitle = (
-            f"Daily peak-load anomaly as % of ctrl — top {n_top_bas} BAs by HW fraction\n"
-            "July 2011"
-        )
-        fname = "tell_load_anomaly_pct_timeseries_per_ba.png"
-    else:
-        suptitle = (
-            f"Daily peak-load anomaly (member − ctrl) — top {n_top_bas} BAs by HW fraction\n"
-            "July 2011"
-        )
-        fname = "tell_load_anomaly_timeseries_per_ba.png"
-
-    fig.suptitle(suptitle, fontsize=FONTSIZE, y=1.01)
-    fig.tight_layout()
-
-    out = cfg.output_dir / fname
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    log.info("Saved → %s", out)
-
-
-def plot_load_anomaly_timeseries(
-    load_anom_daily: pd.DataFrame,
-    hw_chars: pd.DataFrame,
-    spatial_filter: dict[str, dict[str, dict[str, float]]],
-    cfg: Config,
-    n_top_bas: int = 5,
-) -> None:
-    """
-    For each perturbation member, plot daily peak-load anomaly for the top
-    *n_top_bas* BAs (ranked by mean heatwave-area fraction) as line plots,
-    with heatwave area on a twin y-axis.
-
-    Produces two figures:
-      1. Absolute anomaly in GW   (tell_load_anomaly_timeseries_per_ba.png).
-      2. Anomaly as % of control  (tell_load_anomaly_pct_timeseries_per_ba.png).
-    """
-    _plot_load_anomaly_panel(
-        load_anom_daily, hw_chars, spatial_filter, cfg, as_pct=False, n_top_bas=n_top_bas,
-    )
-    _plot_load_anomaly_panel(
-        load_anom_daily, hw_chars, spatial_filter, cfg, as_pct=True,  n_top_bas=n_top_bas,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Step 7a (cont.) – Per-BA comparison: subplots per BA, lines per member
-# ---------------------------------------------------------------------------
 def _top_bas_by_peak_anomaly(
     load_anom_daily: pd.DataFrame,
     perturbation_members: list[str],
@@ -788,14 +644,9 @@ def _plot_ba_comparison_panel(
 ) -> None:
     """Create a per-BA comparison figure — one narrow panel per BA, shared x-axis.
 
-    Layout mirrors ``plot_interconnection_timeseries`` in interconnection_stress.py:
-      • One panel per BA stacked vertically in a single column.
-      • No subplot titles — the BA name is written on the y-axis instead.
-      • All panels share the x-axis; x-tick labels only on the bottom panel.
-      • y-axis is shared across panels only for the % variant (``as_pct=True``).
-      • Zero reference line on every panel.
-      • Single legend at the bottom of the figure.
-      • Tight vertical spacing (hspace = 0).
+    Layout: one panel per BA stacked vertically, no subplot titles, BA name on
+    y-axis, shared x-axis with tick labels only on the bottom panel, zero
+    reference line, single legend at the bottom, tight vertical spacing.
 
     Parameters
     ----------
@@ -805,17 +656,17 @@ def _plot_ba_comparison_panel(
     spatial_filter  : Accepted for API compatibility; not used here.
     as_pct          : If True plot anomaly as % of control; otherwise in GW.
     bas             : Explicit list of BA codes to show (default: AECI, LGEE,
-                      SWPP, PJM — four BAs with strong heatwave signal).
+                      SWPP, PJM).
     fname_suffix    : String appended before ``.png`` to distinguish outputs.
-    subtitle        : Optional subtitle line describing BA selection.
+    subtitle        : Optional subtitle line.
     """
     FIXED_BAS: list[str] = ["AECI", "LGEE", "SWPP", "PJM"]
     top_bas = bas if bas is not None else FIXED_BAS
-    members = list(ANOMALY_PAIRS)          # perturbation members only
+    members = list(ANOMALY_PAIRS)
     n_bas   = len(top_bas)
 
-    # Use MEMBER_COLORS for consistency; fall back to prop_cycle for unknowns
     _cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
     def _color(member: str, idx: int) -> str:
         return MEMBER_COLORS.get(member, _cycle_colors[idx % len(_cycle_colors)])
 
@@ -823,9 +674,9 @@ def _plot_ba_comparison_panel(
 
     fig, axes = plt.subplots(
         n_bas, 1,
-        figsize=(10, 2.2 * n_bas + 1.0),
+        figsize=(10, 3.2 * n_bas + 1.5),
         sharex=True,
-        sharey=as_pct,   # shared y-extent only for the % plot
+        sharey=as_pct,
         squeeze=False,
     )
     fig.subplots_adjust(hspace=0)
@@ -861,35 +712,26 @@ def _plot_ba_comparison_panel(
                 linewidth=1.8,
                 marker="o",
                 markersize=3,
-                label=member,
+                label=display_name(member)
             )
-            # Collect legend entries only from the first panel
             if row == 0:
                 legend_handles.append(line)
-                legend_labels.append(member)
+                legend_labels.append(display_name(member))
 
         ax.axhline(0, color="black", linewidth=0.6, linestyle="--")
-        # BA name + units as y-axis label; no subplot title
-        ax.set_ylabel(f"{ba} anomaly\n({y_unit})", fontsize=FONTSIZE, labelpad=4)
+        ax.set_ylabel(f"{ba} peak-load\nanomaly ({y_unit})", fontsize=FONTSIZE, labelpad=4)
         ax.tick_params(axis="y", labelsize=FONTSIZE)
         ax.tick_params(axis="x", labelsize=FONTSIZE,
                        labelbottom=(row == n_bas - 1))
-        ax.yaxis.set_major_locator(
-            plt.MaxNLocator(nbins=3, prune="both")
-        )
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=3, prune="both"))
         ax.spines["bottom"].set_linewidth(0.4)
 
     axes[-1, 0].xaxis.set_tick_params(rotation=30)
 
     if as_pct:
-        suptitle = "Daily peak-load anomaly as % of ctrl — per BA"
         fname = f"tell_load_anomaly_pct_timeseries_per_ba_comparison{fname_suffix}.png"
     else:
-        suptitle = "Daily peak-load anomaly (member − ctrl) — per BA"
         fname = f"tell_load_anomaly_timeseries_per_ba_comparison{fname_suffix}.png"
-
-    if subtitle:
-        suptitle = f"{suptitle}\n{subtitle}"
 
     fig.legend(
         legend_handles, legend_labels,
@@ -897,9 +739,8 @@ def _plot_ba_comparison_panel(
         ncol=min(3, len(legend_handles)),
         fontsize=FONTSIZE,
         frameon=True,
-        bbox_to_anchor=(0.5, -0.06),
+        bbox_to_anchor=(0.5, -0.02),
     )
-    fig.suptitle(suptitle, fontsize=FONTSIZE, y=0.98)
 
     out = cfg.output_dir / fname
     fig.savefig(out, bbox_inches="tight")
@@ -917,27 +758,22 @@ def plot_load_anomaly_timeseries_per_ba_comparison(
 
     Produces four figures in two pairs (absolute GW and % of control):
 
-    **Pair 1 — top BAs by heatwave signal** (AECI, LGEE, SWPP, PJM):
+    **Pair 1 — fixed BAs with strong heatwave signal** (AECI, LGEE, SWPP, PJM):
       tell_load_anomaly_timeseries_per_ba_comparison.png
       tell_load_anomaly_pct_timeseries_per_ba_comparison.png
 
     **Pair 2 — top BAs by largest mean peak-load anomaly**:
       tell_load_anomaly_timeseries_per_ba_comparison_top_anomaly.png
       tell_load_anomaly_pct_timeseries_per_ba_comparison_top_anomaly.png
-
-    Each figure is a 2 × 2 grid with one subplot per BA and one line per
-    perturbation member.
     """
     # ── Pair 1: fixed BAs with strongest heatwave signal ────────────────────
     _plot_ba_comparison_panel(
         load_anom_daily, hw_chars, spatial_filter, cfg,
         as_pct=False,
-        subtitle="Top 4 BAs by mean heatwave-area fraction",
     )
     _plot_ba_comparison_panel(
         load_anom_daily, hw_chars, spatial_filter, cfg,
         as_pct=True,
-        subtitle="Top 4 BAs by mean heatwave-area fraction",
     )
 
     # ── Pair 2: BAs with largest mean absolute peak-load anomaly ────────────
@@ -949,14 +785,12 @@ def plot_load_anomaly_timeseries_per_ba_comparison(
             as_pct=False,
             bas=top_anom_bas,
             fname_suffix="_top_anomaly",
-            subtitle="Top 4 BAs by mean absolute peak-load anomaly",
         )
         _plot_ba_comparison_panel(
             load_anom_daily, hw_chars, spatial_filter, cfg,
             as_pct=True,
             bas=top_anom_bas,
             fname_suffix="_top_anomaly",
-            subtitle="Top 4 BAs by mean absolute peak-load anomaly",
         )
     else:
         log.warning("No BAs found for top-anomaly comparison plot; skipping.")
@@ -1000,7 +834,7 @@ def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
                 color=MEMBER_COLORS.get(member, "grey"),
                 alpha=0.55,
                 s=30,
-                label=member,
+                label=display_name(member),
                 edgecolors="none",
             )
 
@@ -1103,6 +937,9 @@ def plot_affected_bas_per_day(
     df = pd.DataFrame(rows).sort_values(["data_source", "date"])
 
     members = list(spatial_filter)
+    # Reorder: ctrl_0, PGW_0, ctrl_1, PGW_1, … so the legend reads
+    # "ctrl row" on top and "PGW row" on the bottom with ncol=4.
+    members = sorted_member_order(set(members))
     n_members = len(members)
     dates = sorted(df["date"].unique())
     n_dates = len(dates)
@@ -1111,29 +948,46 @@ def plot_affected_bas_per_day(
     bar_width = 0.8 / n_members          # total group width ≈ 0.8
     x = np.arange(n_dates)
 
+    _ctrl_members = set(ANOMALY_PAIRS.values())
+
     for i, member in enumerate(members):
         sub = df[df["data_source"] == member].set_index("date").reindex(dates)
+        is_ctrl = member in _ctrl_members
+        base_color = MEMBER_COLORS.get(member, "grey")
+        # Use an RGBA facecolor so alpha only dims the fill, not the hatch.
+        # The hatch edgecolor is set separately at full opacity so it stays visible.
+        rgba = (*mcolors.to_rgb(base_color), 0.25 if is_ctrl else 0.85)
         ax.bar(
             x + i * bar_width,
             sub["n_affected_bas"].fillna(0),
             bar_width,
-            label=member,
-            color=MEMBER_COLORS.get(member, "grey"),
-            alpha=0.8,
+            label=display_name(member),
+            facecolor=rgba,
+            edgecolor=base_color if is_ctrl else "white",
+            linewidth=0.8,
+            hatch="//" if is_ctrl else "",
         )
 
     ax.set_xticks(x + bar_width * (n_members - 1) / 2)
-    ax.set_xticklabels([d.strftime("%m-%d") for d in dates], rotation=30)
-    ax.set_xlabel("Date", fontsize=FONTSIZE)
+    ax.set_xticklabels([d.strftime("%Y-%m-%d") for d in dates], rotation=30)
     ax.set_ylabel("Number of BAs under heatwave", fontsize=FONTSIZE)
-    ax.set_title("Heatwave-affected BAs per day (all members) — July 2011", fontsize=FONTSIZE)
-    ax.legend(fontsize=FONTSIZE - 1)
+
+
+    ax.legend(
+        loc="upper center",
+        ncol=min(5, n_members),
+        bbox_to_anchor=(0.5, -0.3),
+        fontsize=FONTSIZE - 1,
+        frameon=True,
+    )
     fig.tight_layout()
 
     out = cfg.output_dir / "tell_affected_bas_per_day.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
+    out_csv = cfg.output_dir / "tell_affected_bas_per_day.csv"
+    df.to_csv(out_csv, index=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1318,10 +1172,7 @@ def main() -> None:
     log.info("Plotting affected BAs per day …")
     plot_affected_bas_per_day(spatial_filter, cfg)
 
-    log.info("Plotting load anomaly time series (spatially filtered, per-BA) …")
-    plot_load_anomaly_timeseries(load_daily_filtered, hw_chars, spatial_filter, cfg)
-
-    log.info("Plotting load anomaly time series per-BA comparison (members overlaid) …")
+    log.info("Plotting per-BA load anomaly timeseries comparison …")
     plot_load_anomaly_timeseries_per_ba_comparison(
         load_daily_filtered, hw_chars, spatial_filter, cfg
     )
