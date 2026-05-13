@@ -40,6 +40,7 @@ mpl.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 
 # Reuse member definitions and output path from the ensemble runner
 from run_heatwave_ensemble import ENSEMBLE_MEMBERS, OUTPUT_BASE_DIR
@@ -79,7 +80,6 @@ class TimeseriesMetric(NamedTuple):
     csv_tag:      str    # tag in the CSV filename
     value_col:    str    # column to plot on the y-axis
     ylabel:       str    # y-axis label
-    title:        str    # plot title
     out_fname_tag: str   # stem of the output PNG filename
     scale:        float = 1.0   # multiply values by this before plotting
 
@@ -89,7 +89,6 @@ TIMESERIES_METRICS: list[TimeseriesMetric] = [
         csv_tag       = "largest_contiguous_heatwave_area_timeseries",
         value_col     = "largest_region_area_km2",
         ylabel        = "Largest contiguous heatwave area\n(million km²)",
-        title         = "Largest contiguous heatwave area",
         out_fname_tag = "largest_contiguous_heatwave_area_comparison",
         scale         = 1e-6,   # km² → million km²
     ),
@@ -97,18 +96,23 @@ TIMESERIES_METRICS: list[TimeseriesMetric] = [
         csv_tag       = "mean_anomaly_largest_contiguous_heatwave_area_timeseries",
         value_col     = "largest_region_mean_anomaly_K",
         ylabel        = "Mean anomaly (K)",
-        title         = "Mean anomaly for the largest contiguous heatwave area",
         out_fname_tag = "mean_anomaly_largest_contiguous_heatwave_area_comparison",
     ),
     TimeseriesMetric(
         csv_tag       = "max_anomaly_largest_contiguous_heatwave_area_timeseries",
         value_col     = "largest_region_max_anomaly_K",
         ylabel        = "Maximum anomaly (K)",
-        title         = "Maximum anomaly for the largest contiguous heatwave area",
         out_fname_tag = "max_anomaly_largest_contiguous_heatwave_area_comparison",
     ),
 ]
 
+# ---------------------------------------------------------------------------
+# Colour: PGW member uses MEMBER_COLORS directly;
+#         ctrl member uses the colour of its paired PGW member
+def _color(src: str) -> str:
+    if src in MEMBER_COLORS:
+        return MEMBER_COLORS[src]
+    return "#333333"
 
 # ---------------------------------------------------------------------------
 def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m") -> pd.DataFrame:
@@ -186,16 +190,7 @@ def plot_comparison(
         df = df.copy()
         df[metric.value_col] = df[metric.value_col] * metric.scale
 
-    # ctrl members are those NOT in ANOMALY_PAIRS (PGW) and NOT obs
-    _pgw_members  = set(ANOMALY_PAIRS.keys())
     _ctrl_members = set(ANOMALY_PAIRS.values())
-
-    # Colour: PGW member uses MEMBER_COLORS directly;
-    #         ctrl member uses the colour of its paired PGW member
-    def _color(src: str) -> str:
-        if src in MEMBER_COLORS:
-            return MEMBER_COLORS[src]
-        return "#333333"
 
     fig, ax = plt.subplots(figsize=(11, 6))
 
@@ -231,7 +226,6 @@ def plot_comparison(
                 linestyle="-",
             )
 
-    #ax.set_xlabel("Date", fontsize=FONTSIZE)
     ax.set_ylabel(metric.ylabel, fontsize=FONTSIZE)
     ax.set_xlim(_XAXIS_MIN, _XAXIS_MAX)
     ax.xaxis.set_major_locator(mdates.DayLocator())
@@ -257,11 +251,96 @@ def plot_comparison(
 
 
 # ---------------------------------------------------------------------------
+def plot_longest_duration_distribution(varnames: str = "t2m") -> None:
+    """
+    Read per-member longest-heatwave-duration CSVs and create a facet histogram
+    plot comparing each ctrl/SSP245 pair.
+
+    Layout: 5 rows × 1 column (one row per ANOMALY_PAIRS entry).
+    Each facet shows two overlapping histograms — ctrl (hatched) and its
+    paired SSP245 member (solid fill) — using the shared MEMBER_COLORS.
+    """
+    csv_tag = "longest_heatwave_duration"
+    value_col = "longest_duration"
+
+    # Load one CSV per member (ctrl + SSP245), skip missing
+    member_data: dict[str, pd.Series] = {}
+    for pgw, ctrl in ANOMALY_PAIRS.items():
+        for src in (ctrl, pgw):
+            yr = next(
+                (m.yr_start for m in ENSEMBLE_MEMBERS if m.data_source == src), None
+            )
+            if yr is None:
+                continue
+            fname = (
+                OUTPUT_BASE_DIR
+                / src
+                / f"{src}_{varnames}_{csv_tag}_{yr}.csv"
+            )
+            if not fname.exists():
+                log.warning("CSV not found, skipping: %s", fname)
+                continue
+            df = pd.read_csv(fname)
+            if value_col not in df.columns:
+                log.warning("Column '%s' not found in %s; skipping.", value_col, fname)
+                continue
+            # Drop NaNs (ocean cells) and keep only land cells with duration > 0
+            member_data[src] = df[value_col].dropna()
+            log.info("Loaded %s", fname)
+
+    pairs = list(ANOMALY_PAIRS.items())  # [(pgw, ctrl), ...]
+    ncols = 2
+    nrows = -(-len(pairs) // ncols)  # ceiling division
+
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(8 * ncols, 4 * nrows),
+                             sharex=True)
+    axes_flat = axes.flatten()
+
+    # Hide any unused panels
+    for idx in range(len(pairs), len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+
+    for ax, (pgw, ctrl) in zip(axes_flat, pairs):
+        for src, alpha in [(ctrl, 0.4), (pgw, 0.6)]:
+            data = member_data.get(src)
+            if data is None or data.empty:
+                continue
+            sns.kdeplot(
+                data,
+                ax=ax,
+                color=MEMBER_COLORS.get(src, "#333333"),
+                fill=False,
+                alpha=1.0,
+                linewidth=2.0,
+                linestyle="--" if src == ctrl else "-",
+                label=display_name(src),
+            )
+        ax.set_ylabel("Density", fontsize=FONTSIZE + 2)
+        ax.tick_params(labelsize=FONTSIZE + 2)
+        ax.legend(fontsize=FONTSIZE + 2, frameon=True)
+
+    axes_flat[-1].set_xlabel("Longest consecutive heatwave duration (days)", fontsize=FONTSIZE + 2)
+    # Also label the second-to-last visible axis if nrows*ncols > len(pairs)
+    if len(pairs) % ncols != 0:
+        axes_flat[len(pairs) - 1].set_xlabel("Longest consecutive heatwave duration (days)", fontsize=FONTSIZE + 2)
+    fig.suptitle("Distribution of longest heatwave duration per grid cell",
+                 fontsize=FONTSIZE+2, y=1.01)
+    fig.tight_layout()
+
+    out_path = COMPARISON_DIR / "longest_heatwave_duration_distribution.png"
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved duration distribution plot → %s", out_path)
+
+
+# ---------------------------------------------------------------------------
 def main() -> None:
     COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
 
     for metric in TIMESERIES_METRICS:
         plot_comparison(metric, show_obs=False)
+
+    plot_longest_duration_distribution()
 
     log.info("All comparison plots written to %s", COMPARISON_DIR)
 

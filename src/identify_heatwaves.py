@@ -68,6 +68,12 @@ log = logging.getLogger(__name__)
 # Configuration  ← edit here to change any run parameter
 # ---------------------------------------------------------------------------
 
+# Select which heatwave event to analyse.
+# Choices:
+#   "2011" — July 2011 heatwave (July 17–24, EAMxx SSP245 simulation)
+#   "2021" — June–July 2021 heatwave (June 24 – July 2, update paths below)
+HEATWAVE_SELECTOR = "2011"
+
 # ERA5 historical data — used only to build the percentile threshold
 ERA5_HIST_CONFIG = dict(
     fpath="/pscratch/sd/e/esinha/ERA5_CONUS/",
@@ -76,19 +82,50 @@ ERA5_HIST_CONFIG = dict(
 )
 HIST_CONFIG = dict(yr_start=1981, yr_end=2010, mon_start=1, mon_end=12)
 
+# ── July 2011 heatwave ──────────────────────────────────────────────────────
 # EAMxx simulation data — the analysis period
-EAMXX_DATA_CONFIG = dict(
+EAMXX_DATA_CONFIG_2011 = dict(
     fpath="/pscratch/sd/j/jli628/EAMxx_regridding/heatwave_201107_SSP245/",
     fname_abb="output.eamxx.INSTANT.nsteps_x9.",
     eamxx_varname="T_2m",     # native variable name inside the EAMxx files
     varnames="t2m",           # rename to this common name after reading
     data_source="EAMxx_SSP245",  # label used in output filenames and CSV columns
 )
-ANALYSIS_CONFIG = dict(
+ANALYSIS_CONFIG_2011 = dict(
     yr_start=2011, yr_end=2011,
     mon_start=7,   mon_end=7,
     day_start=17,  day_end=24,   # day_start=17: first day is spin-up, skip it
 )
+
+# ── June–July 2021 heatwave (24 June – 2 July 2021) ────────────────────────
+# Update fpath to point to the actual EAMxx data for this event.
+EAMXX_DATA_CONFIG_2021 = dict(
+    fpath="/pscratch/sd/j/jli628/EAMxx_regridding/heatwave_202106/",  # ← update path
+    fname_abb="output.eamxx.INSTANT.nsteps_x9.",
+    eamxx_varname="T_2m",
+    varnames="t2m",
+    data_source="EAMxx_2021hw",
+)
+# day_start / day_end refer to the boundary days within their respective months.
+# Because the heatwave spans two months the loader splits the read into
+# two segments (June 24–30, July 1–2) and concatenates them automatically.
+ANALYSIS_CONFIG_2021 = dict(
+    yr_start=2021, yr_end=2021,
+    mon_start=6,   mon_end=7,
+    day_start=24,  day_end=2,
+)
+
+# ── Active configs (resolved from HEATWAVE_SELECTOR) ───────────────────────
+_HW_CONFIGS = {
+    "2011": (EAMXX_DATA_CONFIG_2011, ANALYSIS_CONFIG_2011),
+    "2021": (EAMXX_DATA_CONFIG_2021, ANALYSIS_CONFIG_2021),
+}
+if HEATWAVE_SELECTOR not in _HW_CONFIGS:
+    raise ValueError(
+        f"Unknown HEATWAVE_SELECTOR '{HEATWAVE_SELECTOR}'. "
+        f"Valid choices: {list(_HW_CONFIGS)}"
+    )
+EAMXX_DATA_CONFIG, ANALYSIS_CONFIG = _HW_CONFIGS[HEATWAVE_SELECTOR]
 
 PERCENTILE_VALUE = 0.9          # 90th percentile threshold
 FIG_EXTENT = [235, 294, 24, 47] # [lon_min, lon_max, lat_min, lat_max]
@@ -321,19 +358,53 @@ def load_and_prepare(
     """
 
     # --- EAMxx analysis data ------------------------------------------------
-    log.info(
-        "Reading EAMxx data (%d–%d, month %d, days %d–%d) …",
-        analysis_cfg["yr_start"], analysis_cfg["yr_end"],
-        analysis_cfg["mon_start"],
-        analysis_cfg["day_start"], analysis_cfg["day_end"],
-    )
-    ds = read_EAMxx_data(
-        analysis_cfg["yr_start"], analysis_cfg["yr_end"],
-        analysis_cfg["mon_start"], analysis_cfg["mon_end"],
-        analysis_cfg["day_start"], analysis_cfg["day_end"],
-        eamxx_data_cfg["fpath"], eamxx_data_cfg["fname_abb"],
-        eamxx_data_cfg["eamxx_varname"], eamxx_data_cfg["varnames"],
-    )
+    mon_start = analysis_cfg["mon_start"]
+    mon_end   = analysis_cfg["mon_end"]
+    day_start = analysis_cfg["day_start"]
+    day_end   = analysis_cfg["day_end"]
+    yr_start  = analysis_cfg["yr_start"]
+    yr_end    = analysis_cfg["yr_end"]
+
+    if mon_start != mon_end:
+        # Cross-month heatwave: split read into two segments and concatenate.
+        # Segment 1 — from day_start to the last day of mon_start.
+        last_day_seg1 = calendar.monthrange(yr_start, mon_start)[1]
+        log.info(
+            "Reading EAMxx data — segment 1: %d-%02d, days %d–%d …",
+            yr_start, mon_start, day_start, last_day_seg1,
+        )
+        ds_a = read_EAMxx_data(
+            yr_start, yr_start,
+            mon_start, mon_start,
+            day_start, last_day_seg1,
+            eamxx_data_cfg["fpath"], eamxx_data_cfg["fname_abb"],
+            eamxx_data_cfg["eamxx_varname"], eamxx_data_cfg["varnames"],
+        )
+        # Segment 2 — from day 1 to day_end in mon_end.
+        log.info(
+            "Reading EAMxx data — segment 2: %d-%02d, days 1–%d …",
+            yr_end, mon_end, day_end,
+        )
+        ds_b = read_EAMxx_data(
+            yr_end, yr_end,
+            mon_end, mon_end,
+            1, day_end,
+            eamxx_data_cfg["fpath"], eamxx_data_cfg["fname_abb"],
+            eamxx_data_cfg["eamxx_varname"], eamxx_data_cfg["varnames"],
+        )
+        ds = xr.concat([ds_a, ds_b], dim="time")
+    else:
+        log.info(
+            "Reading EAMxx data (%d–%d, month %d, days %d–%d) …",
+            yr_start, yr_end, mon_start, day_start, day_end,
+        )
+        ds = read_EAMxx_data(
+            yr_start, yr_end,
+            mon_start, mon_end,
+            day_start, day_end,
+            eamxx_data_cfg["fpath"], eamxx_data_cfg["fname_abb"],
+            eamxx_data_cfg["eamxx_varname"], eamxx_data_cfg["varnames"],
+        )
     log.info("EAMxx data loaded: %s", ds)
 
     # --- interpolate EAMxx to ERA5 lat/lon coordinates ----------------------
@@ -549,6 +620,13 @@ def plot_longest_duration(
         dask="parallelized",
         output_dtypes=[float],
     )
+    # Save per-grid-cell longest duration to CSV for ensemble comparison
+    csv_path = _out_fname("longest_heatwave_duration", varnames, analysis_cfg["yr_start"], data_source, ext="csv", output_dir=output_dir)
+    df_dur = longest_duration.to_dataframe(name="longest_duration").reset_index()
+    df_dur["Data_Source"] = data_source
+    df_dur.to_csv(csv_path, index=False)
+    log.info("Saved longest duration CSV → %s", csv_path)
+
     prefix = _month_year_prefix(analysis_cfg["mon_start"], analysis_cfg["yr_start"])
     _plot_spatial_map(
         longest_duration, "duration",

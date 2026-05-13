@@ -80,6 +80,13 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration  ← defaults; all overridable via CLI args or env vars
 # ---------------------------------------------------------------------------
+
+# Select which heatwave event to analyse.
+# Choices:
+#   "2011" — July 2011 heatwave (July 17–24)
+#   "2021" — June–July 2021 heatwave (June 24 – July 2)
+HEATWAVE_SELECTOR = "2011"
+
 # Root directory of TELL output CSVs.
 # Override with the TELL_BASE environment variable:
 #   export TELL_BASE=/path/to/TELL_outputs
@@ -88,8 +95,8 @@ _TELL_BASE_DEFAULT = (
 )
 TELL_BASE = Path(os.environ.get("TELL_BASE", _TELL_BASE_DEFAULT))
 
-# Map data_source label → TELL subdirectory name
-TELL_MEMBER_DIRS: dict[str, str] = {
+# ── July 2011 heatwave ──────────────────────────────────────────────────────
+TELL_MEMBER_DIRS_2011: dict[str, str] = {
     "EAMxx_ctrl":        "EAMxx",
     "EAMxx_ctrl_p12":    "EAMxx_p12",
     "EAMxx_ctrl_p24":    "EAMxx_p24",
@@ -101,9 +108,37 @@ TELL_MEMBER_DIRS: dict[str, str] = {
     "EAMxx_SSP245_n12":  "EAMxx_SSP245_n12",
     "EAMxx_SSP245_n24":  "EAMxx_SSP245_n24",
 }
+ANALYSIS_WINDOW_2011 = ("2011-07-17", "2011-07-24")
+YEAR_2011            = 2011
 
-# Shared analysis window (must overlap all TELL files)
-ANALYSIS_WINDOW = ("2011-07-17", "2011-07-24")
+# ── June–July 2021 heatwave (24 June – 2 July 2021) ────────────────────────
+# Update TELL subdirectory names once the 2021 TELL outputs are available.
+TELL_MEMBER_DIRS_2021: dict[str, str] = {
+    "EAMxx_ctrl":        "EAMxx_2021",           # ← update subdirectory names
+    "EAMxx_ctrl_p12":    "EAMxx_2021_p12",
+    "EAMxx_ctrl_p24":    "EAMxx_2021_p24",
+    "EAMxx_ctrl_n12":    "EAMxx_2021_n12",
+    "EAMxx_ctrl_n24":    "EAMxx_2021_n24",
+    "EAMxx_SSP245":      "EAMxx_SSP245_2021",
+    "EAMxx_SSP245_p12":  "EAMxx_SSP245_2021_p12",
+    "EAMxx_SSP245_p24":  "EAMxx_SSP245_2021_p24",
+    "EAMxx_SSP245_n12":  "EAMxx_SSP245_2021_n12",
+    "EAMxx_SSP245_n24":  "EAMxx_SSP245_2021_n24",
+}
+ANALYSIS_WINDOW_2021 = ("2021-06-24", "2021-07-02")
+YEAR_2021            = 2021
+
+# ── Active configs (resolved from HEATWAVE_SELECTOR) ───────────────────────
+_HW_TELL_CONFIGS = {
+    "2011": (TELL_MEMBER_DIRS_2011, ANALYSIS_WINDOW_2011, YEAR_2011, "July 2011"),
+    "2021": (TELL_MEMBER_DIRS_2021, ANALYSIS_WINDOW_2021, YEAR_2021, "June\u2021July 2021"),
+}
+if HEATWAVE_SELECTOR not in _HW_TELL_CONFIGS:
+    raise ValueError(
+        f"Unknown HEATWAVE_SELECTOR '{HEATWAVE_SELECTOR}'. "
+        f"Valid choices: {list(_HW_TELL_CONFIGS)}"
+    )
+TELL_MEMBER_DIRS, ANALYSIS_WINDOW, YEAR, HW_LABEL = _HW_TELL_CONFIGS[HEATWAVE_SELECTOR]
 
 # Heatwave ensemble output root (produced by run_heatwave_ensemble.py)
 ENSEMBLE_OUTPUT = Path(__file__).parent / "outputs"
@@ -117,7 +152,6 @@ HW_MEAN_COL   = "largest_region_mean_anomaly_K"
 HW_MAX_COL    = "largest_region_max_anomaly_K"
 
 VARNAMES = "t2m"
-YEAR     = 2011
 
 # Output directory for TELL–heatwave linkage figures
 OUTPUT_DIR = ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
@@ -136,7 +170,7 @@ EAMXX_NLON = 1841
 # Minimum fraction of a BA's weighted grid-cell area that must lie under
 # the heatwave for that BA to be considered "affected" on a given day.
 # 0.0 ⇒ any overlap counts; 0.5 ⇒ majority overlap required.
-HW_BA_FRAC_THRESHOLD = 0.0
+HW_BA_FRAC_THRESHOLD = 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -630,7 +664,127 @@ def _top_bas_by_peak_anomaly(
     )
     return top
 
+# ---------------------------------------------------------------------------
+def _plot_ba_comparison_panel_affected_area(
+    spatial_filter: dict[str, dict[str, dict[str, float]]],
+    cfg: Config,
+    *,
+    bas: list[str] | None = None,
+    fname_suffix: str = "",
+    subtitle: str = "",
+) -> None:
+    """Create a per-BA comparison figure — one narrow panel per BA, shared x-axis.
 
+    Layout: one panel per BA stacked vertically, no subplot titles, BA name on
+    y-axis, shared x-axis with tick labels only on the bottom panel, zero
+    reference line, single legend at the bottom, tight vertical spacing.
+
+    Parameters
+    ----------
+    spatial_filter:  dict[str, dict[str, dict[str, float]]],
+    bas             : Explicit list of BA codes to show (default: AECI, LGEE,
+                      SWPP, PJM).
+    fname_suffix    : String appended before ``.png`` to distinguish outputs.
+    subtitle        : Optional subtitle line.
+    """
+    #FIXED_BAS: list[str] = ["PJM", "MISO", "SWPP", "ERCO"]
+    #FIXED_BAS: list[str] = ["AECI", "LGEE", "SWPP", "PJM"]
+    FIXED_BAS: list[str] = ["AZPS", "PACE", "PNM", "WACM"]
+    top_bas = bas if bas is not None else FIXED_BAS
+    members = list(ANOMALY_PAIRS)
+    n_bas   = len(top_bas)
+
+    _ctrl_members = set(ANOMALY_PAIRS.values())
+    _cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    def _color(member: str, idx: int) -> str:
+        return MEMBER_COLORS.get(member, _cycle_colors[idx % len(_cycle_colors)])
+
+    rows = []
+    for member, daily_bas in spatial_filter.items():
+        for date_str, ba_frac_dict in daily_bas.items():
+            for ba, frac in ba_frac_dict.items():
+                rows.append({
+                "data_source": member,
+                "BA": ba,
+                "date": pd.Timestamp(date_str),
+                "hw_area_frac": frac
+            })
+
+    df = pd.DataFrame(rows)
+
+    members = list(spatial_filter)
+    # Reorder: ctrl_0, PGW_0, ctrl_1, PGW_1, … so the legend reads
+    # "ctrl row" on top and "PGW row" on the bottom with ncol=4.
+    members = sorted_member_order(set(members))
+
+    fig, axes = plt.subplots(
+        n_bas, 1,
+        figsize=(12, 3.2 * n_bas + 1.5),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    fig.subplots_adjust(hspace=0)
+
+    legend_handles: list = []
+    legend_labels:  list = []
+
+
+    for row, ba in enumerate(top_bas):
+        ax = axes[row, 0]
+
+        for i, member in enumerate(members):
+            color = _color(member, i)
+            is_ctrl = member in _ctrl_members
+            sub = df[
+                (df["data_source"] == member) &
+                (df["BA"] == ba)
+            ].sort_values("date")
+
+            if sub.empty:
+                continue
+
+            line, = ax.plot(
+                sub["date"], sub["hw_area_frac"],
+                color=color,
+                linewidth=2,
+                linestyle="--" if is_ctrl else "-",
+                marker="o",
+                markersize=3,
+                label=display_name(member)
+            )
+            if row == 0:
+                legend_handles.append(line)
+                legend_labels.append(display_name(member))
+
+        ax.axhline(0, color="black", linewidth=0.6, linestyle="--")
+        ax.set_ylabel(f"{ba} fraction\nin heatwave", fontsize=FONTSIZE, labelpad=4)
+        ax.tick_params(axis="y", labelsize=FONTSIZE)
+        ax.tick_params(axis="x", labelsize=FONTSIZE,
+                       labelbottom=(row == n_bas - 1))
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=3, prune="both"))
+        ax.spines["bottom"].set_linewidth(0.4)
+
+    axes[-1, 0].xaxis.set_tick_params(rotation=30)
+
+    fname = f"ba_comparison{fname_suffix}.png"
+
+    fig.legend(
+        legend_handles, legend_labels,
+        loc="lower center",
+        ncol=min(5, len(legend_handles)),
+        fontsize=FONTSIZE,
+        frameon=True,
+        bbox_to_anchor=(0.5, -0.02),
+    )
+
+    out = cfg.output_dir / fname
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved → %s", out)
+
+# ---------------------------------------------------------------------------
 def _plot_ba_comparison_panel(
     load_anom_daily: pd.DataFrame,
     hw_chars: pd.DataFrame,
@@ -747,6 +901,7 @@ def _plot_ba_comparison_panel(
     plt.close(fig)
     log.info("Saved → %s", out)
 
+# ---------------------------------------------------------------------------
 
 def plot_load_anomaly_timeseries_per_ba_comparison(
     load_anom_daily: pd.DataFrame,
@@ -868,7 +1023,7 @@ def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
     )
 
     fig.suptitle(
-        "Peak-load anomaly vs heatwave characteristics — July 2011\n"
+        f"Peak-load anomaly vs heatwave characteristics — {HW_LABEL}\n"
         "(each point = one BA × day; dashed = OLS trend per member)",
         fontsize=FONTSIZE,
     )
@@ -944,7 +1099,7 @@ def plot_affected_bas_per_day(
     dates = sorted(df["date"].unique())
     n_dates = len(dates)
 
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = plt.subplots(figsize=(12, 8))
     bar_width = 0.8 / n_members          # total group width ≈ 0.8
     x = np.arange(n_dates)
 
@@ -971,6 +1126,10 @@ def plot_affected_bas_per_day(
     ax.set_xticks(x + bar_width * (n_members - 1) / 2)
     ax.set_xticklabels([d.strftime("%Y-%m-%d") for d in dates], rotation=30)
     ax.set_ylabel("Number of BAs under heatwave", fontsize=FONTSIZE)
+    ax.set_title(
+        f"Threshold: fraction in heatwave > {cfg.hw_ba_frac_threshold:.2f}  |  July 2011\n",
+        fontsize=FONTSIZE,
+    )
 
 
     ax.legend(
@@ -982,11 +1141,11 @@ def plot_affected_bas_per_day(
     )
     fig.tight_layout()
 
-    out = cfg.output_dir / "tell_affected_bas_per_day.png"
+    out = cfg.output_dir / f"tell_affected_bas_per_day_{cfg.hw_ba_frac_threshold}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
-    out_csv = cfg.output_dir / "tell_affected_bas_per_day.csv"
+    out_csv = cfg.output_dir / f"tell_affected_bas_per_day_{cfg.hw_ba_frac_threshold}.csv"
     df.to_csv(out_csv, index=False)
 
 
@@ -1176,6 +1335,9 @@ def main() -> None:
     plot_load_anomaly_timeseries_per_ba_comparison(
         load_daily_filtered, hw_chars, spatial_filter, cfg
     )
+
+    _plot_ba_comparison_panel_affected_area(
+    spatial_filter, cfg, fname_suffix="_affected_area", subtitle="BA fraction under heatwave")
 
     log.info("Plotting scatter matrix (spatially filtered) …")
     plot_scatter_matrix(merged, cfg)
