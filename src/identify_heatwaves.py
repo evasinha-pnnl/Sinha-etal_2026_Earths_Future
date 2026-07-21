@@ -40,8 +40,12 @@ import matplotlib as mpl
 
 mpl.use("Agg")
 import matplotlib.colors as colors
+import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import numpy as np
 
 from util_contour_levels import myDict_clevels
 from util_heatwaves import (
@@ -71,8 +75,8 @@ log = logging.getLogger(__name__)
 # Select which heatwave event to analyse.
 # Choices:
 #   "2011" — July 2011 heatwave (July 17–24, EAMxx SSP245 simulation)
-#   "2021" — June–July 2021 heatwave (June 24 – July 2, update paths below)
-HEATWAVE_SELECTOR = "2011"
+#   "2021" — June–July 2021 heatwave (June 24 – July 7, update paths below)
+HEATWAVE_SELECTOR = "2021"
 
 # ERA5 historical data — used only to build the percentile threshold
 ERA5_HIST_CONFIG = dict(
@@ -89,7 +93,7 @@ EAMXX_DATA_CONFIG_2011 = dict(
     fname_abb="output.eamxx.INSTANT.nsteps_x9.",
     eamxx_varname="T_2m",     # native variable name inside the EAMxx files
     varnames="t2m",           # rename to this common name after reading
-    data_source="EAMxx_SSP245",  # label used in output filenames and CSV columns
+    data_source="2011_SSP245_p0",  # label used in output filenames and CSV columns
 )
 ANALYSIS_CONFIG_2011 = dict(
     yr_start=2011, yr_end=2011,
@@ -112,7 +116,7 @@ EAMXX_DATA_CONFIG_2021 = dict(
 ANALYSIS_CONFIG_2021 = dict(
     yr_start=2021, yr_end=2021,
     mon_start=6,   mon_end=7,
-    day_start=24,  day_end=2,
+    day_start=24,  day_end=7,
 )
 
 # ── Active configs (resolved from HEATWAVE_SELECTOR) ───────────────────────
@@ -154,6 +158,9 @@ def _month_year_prefix(mon: int, yr: int) -> str:
     """Return a consistent plot-title prefix, e.g. 'July 2011'."""
     return f"{calendar.month_name[mon]} {yr}"
 
+def _date_month_year_prefix(stday: int, stmon: int, endday: int, endmon: int, yr: int) -> str:
+    """Return a consistent plot-title prefix, e.g. '24 June 2021'."""
+    return f"{stday} {calendar.month_name[stmon]} - {endday} {calendar.month_name[endmon]} {yr}"
 
 def _out_fname(
     tag: str,
@@ -199,6 +206,84 @@ def _save_timeseries(
     df.to_csv(fpath.with_suffix(".csv"), index=False)
     plot_xr_lineplot(da, fname=str(fpath), title=title, xlabel=None, ylabel=ylabel)
     log.info("Saved %s → %s", tag, fpath)
+
+
+def _plot_spatial_on_axis(
+    ax: Any,
+    da: xr.DataArray,
+    fig_extent: list,
+    levels: list | None = None,
+    norm: colors.BoundaryNorm | None = None,
+    title: str | None = None,
+    title_fontsize: int = 10,
+    add_colorbar: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> Any:
+    """Plot spatial data on a cartopy axis (for use in subplots).
+    
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes object (with cartopy projection) to plot on.
+    da : xr.DataArray
+        Data to plot.
+    fig_extent : list
+        [lon_min, lon_max, lat_min, lat_max] for map extent.
+    levels : list | None
+        Contour levels. If None, matplotlib will auto-determine.
+    norm : colors.BoundaryNorm | None
+        Color normalization. If None, linear normalization is used.
+    title : str | None
+        Title for the subplot.
+    title_fontsize : int
+        Font size for the title (default 10).
+    add_colorbar : bool
+        Whether to add a colorbar to this specific subplot (default False).
+    vmin, vmax : float | None
+        Explicit min/max values for color scaling (ignored if levels/norm provided).
+    
+    Returns
+    -------
+    im : mappable
+        The plot object (for creating colorbars).
+    """
+    
+    # Set extent
+    ax.set_extent([fig_extent[0], fig_extent[1], fig_extent[2], fig_extent[3]], 
+                  crs=ccrs.PlateCarree())
+    
+    # Add map features
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+    ax.add_feature(cfeature.STATES, linewidth=0.3, edgecolor='gray')
+    
+    # Plot the data
+    plot_kwargs = {
+        'ax': ax,
+        'transform': ccrs.PlateCarree(),
+        'cmap': cmap,
+        'add_colorbar': add_colorbar,
+        'add_labels': False,
+    }
+    
+    # Add levels/norm if provided, otherwise use vmin/vmax
+    if levels is not None:
+        plot_kwargs['levels'] = levels
+    if norm is not None:
+        plot_kwargs['norm'] = norm
+    if levels is None and norm is None:
+        if vmin is not None:
+            plot_kwargs['vmin'] = vmin
+        if vmax is not None:
+            plot_kwargs['vmax'] = vmax
+    
+    im = da.plot(**plot_kwargs)
+    
+    if title:
+        ax.set_title(title, fontsize=title_fontsize)
+    
+    return im
 
 
 def _plot_spatial_map(
@@ -287,8 +372,10 @@ def compute_threshold(
         )
 
     log.info("Computing %.0f-th percentile threshold …", percentile_value * 100)
+    # Load data into memory to avoid dask chunking issues with quantile
+    ds_hist_loaded = ds_hist.load()
     ds_q90 = (
-        ds_hist
+        ds_hist_loaded
         .groupby("time.dayofyear")
         .quantile(percentile_value, dim="time")
         .drop_vars("quantile")
@@ -506,7 +593,11 @@ def plot_frequency(
 ) -> None:
     """Plot and save heatwave-day frequency map."""
     freq_days = heatwave_mask.fillna(False).sum(dim="time")
-    prefix = _month_year_prefix(analysis_cfg["mon_start"], analysis_cfg["yr_start"])
+    prefix = _date_month_year_prefix(
+        analysis_cfg["day_start"], analysis_cfg["mon_start"],
+        analysis_cfg["day_end"], analysis_cfg["mon_end"],
+        analysis_cfg["yr_start"]
+    )
     _plot_spatial_map(
         freq_days, "frequency",
         title=f"{prefix} - Heatwave-day frequency (days)",
@@ -528,13 +619,167 @@ def plot_max_anomaly(
 ) -> None:
     """Plot and save maximum heatwave anomaly map."""
     max_anom = heatwave_anomaly.max(dim="time")
-    prefix = _month_year_prefix(analysis_cfg["mon_start"], analysis_cfg["yr_start"])
+    prefix = _date_month_year_prefix(
+        analysis_cfg["day_start"], analysis_cfg["mon_start"],
+        analysis_cfg["day_end"], analysis_cfg["mon_end"],
+        analysis_cfg["yr_start"]
+    )
     _plot_spatial_map(
         max_anom, "anomaly",
         title=f"{prefix} - Maximum heatwave anomaly (K)",
         out_fname=_out_fname("max_heatwave_anomaly", varnames, analysis_cfg["yr_start"], data_source, output_dir=output_dir),
         fig_extent=fig_extent,
     )
+
+
+def plot_daily_anomaly_panels(
+    anomaly: xr.DataArray,
+    varnames: str,
+    analysis_cfg: dict,
+    fig_extent: list,
+    data_source: str,
+    output_dir: Path | None = None,
+) -> None:
+    """Plot and save multi-panel figure with anomaly map for each day.
+    
+    Creates a grid of subplots with one panel per day in the analysis period,
+    showing the full temperature anomaly (not masked to heatwave areas).
+    Grid dimensions are automatically determined based on the number of days.
+    
+    Parameters
+    ----------
+    anomaly : xr.DataArray
+        Temperature anomaly (Tmax - threshold) for all grid points and times.
+    varnames : str
+        Variable name for output filename.
+    analysis_cfg : dict
+        Analysis configuration with time period info.
+    fig_extent : list
+        Map extent [lon_min, lon_max, lat_min, lat_max].
+    data_source : str
+        Data source label for output filename.
+    output_dir : Path | None
+        Output directory for the figure.
+    """
+
+    
+    # Get the number of days
+    n_days = len(anomaly.time)
+    if n_days == 0:
+        log.warning("No time steps in anomaly; skipping daily anomaly panels.")
+        return
+    
+    # Check for valid data
+    if int(anomaly.notnull().sum()) == 0:
+        log.warning("Anomaly array has no valid data; skipping daily anomaly panels.")
+        return
+    
+    # Get data range for auto-level computation if needed
+    data_min = float(anomaly.min())
+    data_max = float(anomaly.max())
+    
+    # Size each panel to match the map's actual aspect ratio (lon span / lat span).
+    # Cartopy locks the GeoAxes aspect to the extent, so a panel cell taller than
+    # this ratio just leaves dead space above/below the map — which is what was
+    # showing up as "too much space between rows".
+    lon_span = fig_extent[1] - fig_extent[0]
+    lat_span = fig_extent[3] - fig_extent[2]
+    panel_w = 5
+    panel_h = panel_w * lat_span / lon_span + 0.5  # + headroom for the per-panel title
+
+    # Determine grid layout: search candidate column counts and pick the one that
+    # gives the best overall figure aspect ratio (close to 16:9) while penalizing
+    # empty trailing panels. This accounts for the panel's real (wide) aspect ratio
+    # instead of just balancing subplot counts into a square-ish grid of panels.
+    target_aspect = 16 / 9
+    best_ncols, best_score = 1, None
+    for ncols_candidate in range(1, n_days + 1):
+        nrows_candidate = int(np.ceil(n_days / ncols_candidate))
+        fig_aspect = (ncols_candidate * panel_w) / (nrows_candidate * panel_h)
+        empty = nrows_candidate * ncols_candidate - n_days
+        score = abs(np.log(fig_aspect / target_aspect)) + 0.1 * (empty / n_days)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_ncols = ncols_candidate
+    ncols = best_ncols
+    nrows = int(np.ceil(n_days / ncols))
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(panel_w * ncols, panel_h * nrows), subplot_kw={'projection': ccrs.PlateCarree()})
+    axes = np.atleast_2d(axes)
+
+    # Get contour levels once (reuse for all panels)
+    levels, norm = _make_clevels("anomaly")
+    
+    # If levels don't cover the data range, compute symmetric range and use that
+    vmin, vmax = None, None
+    if levels is not None:
+        if data_max > max(levels) or data_min < min(levels):
+            levels, norm = None, None
+    
+    # If not using predefined levels, compute symmetric vmin/vmax for anomaly data
+    if levels is None:
+        abs_max = max(abs(data_min), abs(data_max))
+        vmin, vmax = -abs_max, abs_max
+    
+    prefix = _date_month_year_prefix(
+        analysis_cfg["day_start"], analysis_cfg["mon_start"],
+        analysis_cfg["day_end"], analysis_cfg["mon_end"],
+        analysis_cfg["yr_start"]
+    )
+    
+    # Plot each day
+    for idx, time_val in enumerate(anomaly.time.values):
+        row = idx // ncols
+        col = idx % ncols
+        
+        ax = axes[row, col]
+
+        # Select data for this day
+        day_anom = anomaly.sel(time=time_val)
+        
+        # Convert time to pandas timestamp for formatting
+        time_pd = pd.Timestamp(time_val)
+        day_title = time_pd.strftime("%Y-%m-%d")
+        
+        # Use the helper function to plot on this axis
+        im = _plot_spatial_on_axis(
+            ax=ax,
+            da=day_anom,
+            fig_extent=fig_extent,
+            levels=levels,
+            norm=norm,
+            title=day_title,
+            title_fontsize=10,
+            add_colorbar=False,
+            vmin=vmin,
+            vmax=vmax,
+        )
+    
+    # Hide any unused subplots
+    for idx in range(n_days, nrows * ncols):
+        row = idx // ncols
+        col = idx % ncols
+        ax = axes[row, col]
+        ax.axis('off')
+
+    # Tighten spacing between panels now that each cell matches the map's aspect ratio
+    fig.subplots_adjust(hspace=0.15, wspace=0.05)
+
+    # Add a single colorbar for all panels
+    cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+    cbar = plt.colorbar(im, cax=cbar_ax)
+    cbar.set_label('Anomaly (K)', fontsize=12)
+    
+    # Add overall title
+    fig.suptitle(f"{prefix} - Daily heatwave anomaly (K)", fontsize=14, y=0.98)
+    
+    # Save figure
+    out_fname = _out_fname("daily_heatwave_anomaly_panels", varnames, 
+                           analysis_cfg["yr_start"], data_source, output_dir=output_dir)
+    fig.savefig(out_fname, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log.info("Saved daily anomaly panels → %s", out_fname)
 
 
 # ---------------------------------------------------------------------------
@@ -560,8 +805,11 @@ def plot_largest_contiguous_region(
         return
 
     yr = analysis_cfg["yr_start"]
-    prefix = _month_year_prefix(analysis_cfg["mon_start"], yr)
-
+    prefix = _date_month_year_prefix(
+        analysis_cfg["day_start"], analysis_cfg["mon_start"],
+        analysis_cfg["day_end"], analysis_cfg["mon_end"],
+        yr
+    )
     _save_timeseries(
         largest_sizes,
         "largest_contiguous_heatwave_area_timeseries",
@@ -627,7 +875,11 @@ def plot_longest_duration(
     df_dur.to_csv(csv_path, index=False)
     log.info("Saved longest duration CSV → %s", csv_path)
 
-    prefix = _month_year_prefix(analysis_cfg["mon_start"], analysis_cfg["yr_start"])
+    prefix = _date_month_year_prefix(
+        analysis_cfg["day_start"], analysis_cfg["mon_start"],
+        analysis_cfg["day_end"], analysis_cfg["mon_end"],
+        analysis_cfg["yr_start"]
+    )
     _plot_spatial_map(
         longest_duration, "duration",
         title=f"{prefix} - Longest heatwave duration (days)",
@@ -658,7 +910,11 @@ def plot_event_scatter(
         return
 
     yr = analysis_cfg["yr_start"]
-    prefix = _month_year_prefix(analysis_cfg["mon_start"], yr)
+    prefix = _date_month_year_prefix(
+        analysis_cfg["day_start"], analysis_cfg["mon_start"],
+        analysis_cfg["day_end"], analysis_cfg["mon_end"],
+        yr
+    )
     fpath = _out_fname("event_area_duration_scatter", varnames, yr, data_source, output_dir=output_dir)
 
     plot_xr_scatterplot(

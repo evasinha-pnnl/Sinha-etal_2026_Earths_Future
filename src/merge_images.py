@@ -12,8 +12,8 @@ Two composites are produced:
 2. ``heatwave_anomaly_panel_{tag}_{year}.png``
    A 2 × 5 grid of heatwave anomaly spatial maps:
 
-   Row 0 (ctrl)  — EAMxx_ctrl   | EAMxx_ctrl_p12   | EAMxx_ctrl_p24   | EAMxx_ctrl_n12   | EAMxx_ctrl_n24
-   Row 1 (PGW)   — EAMxx_SSP245 | EAMxx_SSP245_p12 | EAMxx_SSP245_p24 | EAMxx_SSP245_n12 | EAMxx_SSP245_n24
+   Row 0 (ctrl)  — 2011_CTRL_p0 | 2011_CTRL_p12 | 2011_CTRL_p24 | 2011_CTRL_n12 | 2011_CTRL_n24
+   Row 1 (PGW)   — 2011_SSP245_p0 | 2011_SSP245_p12 | 2011_SSP245_p24 | 2011_SSP245_n12 | 2011_SSP245_n24
 
 Usage
 -----
@@ -95,18 +95,27 @@ def merge_ba_and_timeseries(
 # ---------------------------------------------------------------------------
 
 # Row definitions: (row label, list of data_source strings left-to-right)
-_PANEL_ROWS: list[tuple[str, list[str]]] = [
-    ("Control", ["EAMxx_ctrl",   "EAMxx_ctrl_p12",   "EAMxx_ctrl_p24",   "EAMxx_ctrl_n12",   "EAMxx_ctrl_n24"]),
-    ("PGW",     ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n12", "EAMxx_SSP245_n24"]),
+_PANEL_ROWS_2011: list[tuple[str, list[str]]] = [
+    ("Control", ["2011_CTRL_p0",   "2011_CTRL_p12",   "2011_CTRL_p24",   "2011_CTRL_n12",   "2011_CTRL_n24"]),
+    ("PGW",     ["2011_SSP245_p0", "2011_SSP245_p12", "2011_SSP245_p24", "2011_SSP245_n12", "2011_SSP245_n24"]),
+]
+
+_PANEL_ROWS_2021: list[tuple[str, list[str]]] = [
+    ("Control", ["2021_CTRL_p0"]),
+    ("PGW",     ["2021_SSP245_p0"]),
 ]
 
 # Column header labels (one per member in the order above)
-_COL_LABELS: list[str] = [
+_COL_LABELS_2011: list[str] = [
     "Initial",
     "Initial +12 hr",
     "Initial +24 hr",
     "Initial -12 hr",
     "Initial -24 hr",
+]
+
+_COL_LABELS_2021: list[str] = [
+    "Initial",
 ]
 
 
@@ -125,12 +134,14 @@ def merge_heatwave_panel(
     ensemble_output_dir: Path,
     tag: str,
     year: int,
+    panel_rows: list[tuple[str, list[str]]],
+    col_labels: list[str],
     cell_width: int = 480,
     cell_height: int = 275,
     label_height: int = 50,
     row_label_width: int = 80,
 ) -> Image.Image:
-    """Build a 2 × 5 composite of heatwave spatial maps.
+    """Build a composite of heatwave spatial maps.
 
     Layout (W = cell_width, H = cell_height, L = label_height,
             R = row_label_width):
@@ -155,6 +166,10 @@ def merge_heatwave_panel(
         Figure type tag, e.g. ``'max_heatwave_anomaly'``.
     year : int
         Analysis year, e.g. ``2011``.
+    panel_rows : list[tuple[str, list[str]]]
+        Row definitions with row labels and ensemble members.
+    col_labels : list[str]
+        Column header labels.
     cell_width, cell_height : int
         Width/height in pixels to which each panel image is rescaled.
     label_height : int
@@ -166,8 +181,8 @@ def merge_heatwave_panel(
     -------
     PIL Image (RGBA)
     """
-    n_cols = len(_COL_LABELS)
-    n_rows = len(_PANEL_ROWS)
+    n_cols = len(col_labels)
+    n_rows = len(panel_rows)
 
     canvas_w = row_label_width + n_cols * cell_width
     canvas_h = label_height    + n_rows * cell_height
@@ -177,13 +192,13 @@ def merge_heatwave_panel(
     font_row    = ImageFont.load_default(size=22)   # row labels
 
     # ── Column headers ───────────────────────────────────────────────────────
-    for col_idx, label in enumerate(_COL_LABELS):
+    for col_idx, label in enumerate(col_labels):
         x = row_label_width + col_idx * cell_width + cell_width // 2
         draw.text((x, label_height // 2), label,
                   fill=(0, 0, 0, 255), font=font_header, anchor="mm")
 
     # ── Row labels (rotated 90°) + cells ─────────────────────────────────────
-    for row_idx, (row_label, members) in enumerate(_PANEL_ROWS):
+    for row_idx, (row_label, members) in enumerate(panel_rows):
         y_top = label_height + row_idx * cell_height
 
         # Render label on a temporary image, rotate, then paste
@@ -232,9 +247,9 @@ if __name__ == "__main__":
     composite_load.save(IMG_OUT)
     log.info("Saved → %s", IMG_OUT)
 
-    # ── Composite 2: heatwave 2 × 4 panels (one per tag) ─────────────────────
+    # ── Composite 2: heatwave panels for 2011 (2 × 5 grid) ───────────────────
     ENSEMBLE_OUTPUT_DIR = SRC / "outputs"
-    YEAR = 2011
+    YEAR_2011 = 2011
     TAGS = [
         "heatwave_frequency",
         "largest_heatwave_region",
@@ -246,9 +261,27 @@ if __name__ == "__main__":
         panel = merge_heatwave_panel(
             ensemble_output_dir=ENSEMBLE_OUTPUT_DIR,
             tag=TAG,
-            year=YEAR,
+            year=YEAR_2011,
+            panel_rows=_PANEL_ROWS_2011,
+            col_labels=_COL_LABELS_2011,
         )
-        panel_out = SRC / f"outputs/heatwave_panel_{TAG}_{YEAR}.png"
+        panel_out = SRC / f"outputs/heatwave_panel_{TAG}_{YEAR_2011}.png"
+        panel_out.parent.mkdir(parents=True, exist_ok=True)
+        panel.save(panel_out)
+        log.info("Saved → %s", panel_out)
+
+    # ── Composite 3: heatwave panels for 2021 (2 × 1 grid) ───────────────────
+    YEAR_2021 = 2021
+
+    for TAG in TAGS:
+        panel = merge_heatwave_panel(
+            ensemble_output_dir=ENSEMBLE_OUTPUT_DIR,
+            tag=TAG,
+            year=YEAR_2021,
+            panel_rows=_PANEL_ROWS_2021,
+            col_labels=_COL_LABELS_2021,
+        )
+        panel_out = SRC / f"outputs/heatwave_panel_{TAG}_{YEAR_2021}.png"
         panel_out.parent.mkdir(parents=True, exist_ok=True)
         panel.save(panel_out)
         log.info("Saved → %s", panel_out)

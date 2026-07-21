@@ -1,10 +1,7 @@
 """
 decompose_load_anomaly.py
 -------------------------
-Partial-correlation / multiple-linear-rDEFAULT_MERGED_CSV = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage" / "tell_heatwave_merged.csv"
-DEFAULT_OUTPUT_DIR = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
-
-# Heatwave predictors: (column_name, display_label, scale_for_display)on decomposition of the
+Partial-correlation / multiple-linear-regression decomposition of the
 warming-driven peak-electricity-load anomaly.
 
 Scientific question
@@ -30,8 +27,8 @@ constant.
 
 Input
 -----
-``outputs/tell_heatwave_linkage/tell_heatwave_merged.csv``
-Written by ``analyze_tell_heatwave.py``.  Required columns:
+``outputs/tell_heatwave_linkage/tell_heatwave_merged_<year>.csv``
+Written by ``analyze_tell_heatwave.py --year <year>``.  Required columns:
   date, BA, data_source, peak_load_anomaly, peak_load_ctrl,
   hw_area_frac, hw_area_anomaly_km2, hw_mean_K, hw_max_K
 
@@ -40,25 +37,25 @@ the regression, so the model is fitted exclusively on BAs that experience the
 heatwave.  Increase ``--min-hw-frac`` (e.g. to 0.1 or 0.25) to restrict to
 BAs substantially covered by the heatwave.
 
-Outputs (all written to OUTPUT_DIR)
-------------------------------------
-tell_load_decomp_std_coeffs.png
+Outputs (all written to OUTPUT_DIR, named with --year)
+----------------------------------------------------------
+tell_load_decomp_std_coeffs_<year>.png
     Horizontal grouped bar chart of standardised OLS coefficients β* per
     member, with 95 % confidence intervals.
 
-tell_load_decomp_partial_regression.png
+tell_load_decomp_partial_regression_<year>.png
     2 × 3 partial-regression (added-variable) plots — one panel per
     (member × predictor), showing the effect of each predictor after
     partialling out the other two.
 
-tell_load_decomp_regression_table.csv
+tell_load_decomp_regression_table_<year>.csv
     Tidy CSV with columns: member, predictor, beta_std, ci_low_95,
     ci_high_95, p_value, r2_full.
 
 Usage
 -----
     conda activate py39_tell
-    python decompose_load_anomaly.py [--merged-csv PATH] [--output-dir DIR] [--min-hw-frac FRAC]
+    python decompose_load_anomaly.py [--year YEAR] [--merged-csv PATH] [--output-dir DIR] [--min-hw-frac FRAC]
 
 Authors
 -------
@@ -95,12 +92,20 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _SRC_DIR     = Path(__file__).parent
 _ENSEMBLE_OUTPUT = _SRC_DIR / "outputs"
+_LINKAGE_DIR = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
 
-DEFAULT_MERGED_CSV = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage" / "tell_heatwave_merged.csv"
-DEFAULT_OUTPUT_DIR = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
+# Matches Config.year's default in analyze_tell_heatwave.py
+DEFAULT_YEAR = 2011
+
+DEFAULT_OUTPUT_DIR = _LINKAGE_DIR
+
+
+def _default_merged_csv(year: int) -> Path:
+    """Path to the tell_heatwave_merged_<year>.csv written by analyze_tell_heatwave.py."""
+    return _LINKAGE_DIR / f"tell_heatwave_merged_{year}.csv"
 
 # Perturbation members to analyse (must match data_source values in merged CSV)
-PERTURBATION_MEMBERS: list[str] = ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n12", "EAMxx_SSP245_n24"]
+PERTURBATION_MEMBERS: list[str] = ["2011_SSP245_p0", "2011_SSP245_p12", "2011_SSP245_p24", "2011_SSP245_n12", "2011_SSP245_n24"]
 
 # Heatwave predictors: (column_name, display_label, scale_for_display)
 PREDICTORS: list[tuple[str, str, float]] = [
@@ -111,11 +116,11 @@ PREDICTORS: list[tuple[str, str, float]] = [
 
 # Colour map for members — keep consistent with analyze_tell_heatwave.py
 MEMBER_COLORS: dict[str, str] = {
-    "EAMxx_SSP245":      "#2ca02c",   # green
-    "EAMxx_SSP245_p12":  "#d62728",   # red
-    "EAMxx_SSP245_p24":  "#9467bd",   # purple
-    "EAMxx_SSP245_n12":  "#7f7f7f",   # gray
-    "EAMxx_SSP245_n24":  "#8c564b",   # brown
+    "2011_SSP245_p0":   "#2ca02c",   # green
+    "2011_SSP245_p12":  "#d62728",   # red
+    "2011_SSP245_p24":  "#9467bd",   # purple
+    "2011_SSP245_n12":  "#7f7f7f",   # gray
+    "2011_SSP245_n24":  "#8c564b",   # brown
 }
 
 FONTSIZE = 12
@@ -311,6 +316,7 @@ def plot_std_coefficients(
     members: list[str],
     predictors: list[tuple[str, str, float]],
     output_dir: Path,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Horizontal grouped bar chart of standardised OLS coefficients.
 
@@ -370,13 +376,13 @@ def plot_std_coefficients(
     ax.tick_params(axis="x", labelsize=FONTSIZE)
     ax.set_title(
         "OLS decomposition of peak-load anomaly\n"
-        "Standardised coefficients with 95 % CI  —  July 2011",
+        f"Standardised coefficients with 95 % CI  —  {year}",
         fontsize=FONTSIZE,
     )
     ax.legend(fontsize=FONTSIZE, loc="lower right")
     fig.tight_layout()
 
-    out = output_dir / "tell_load_decomp_std_coeffs.png"
+    out = output_dir / f"tell_load_decomp_std_coeffs_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -390,6 +396,7 @@ def plot_partial_regression(
     members: list[str],
     predictors: list[tuple[str, str, float]],
     output_dir: Path,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Partial-regression (added-variable) plots.
 
@@ -481,12 +488,12 @@ def plot_partial_regression(
 
     fig.suptitle(
         "Partial-regression plots — load anomaly vs each heatwave characteristic\n"
-        "(each predictor residualised on the other two)  |  July 2011",
+        f"(each predictor residualised on the other two)  |  {year}",
         fontsize=FONTSIZE,
     )
     fig.tight_layout()
 
-    out = output_dir / "tell_load_decomp_partial_regression.png"
+    out = output_dir / f"tell_load_decomp_partial_regression_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -504,11 +511,24 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
+        "--year",
+        type=int,
+        default=DEFAULT_YEAR,
+        help=(
+            "Heatwave event/year to analyse — must match the --year used when "
+            "running analyze_tell_heatwave.py, since it determines the default "
+            "--merged-csv filename."
+        ),
+    )
+    p.add_argument(
         "--merged-csv",
         type=Path,
-        default=DEFAULT_MERGED_CSV,
+        default=None,
         metavar="CSV",
-        help="Path to tell_heatwave_merged.csv produced by analyze_tell_heatwave.py.",
+        help=(
+            "Path to tell_heatwave_merged_<year>.csv produced by "
+            "analyze_tell_heatwave.py. Defaults to the file for --year."
+        ),
     )
     p.add_argument(
         "--output-dir",
@@ -537,10 +557,11 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 def main() -> None:
     args = parse_args()
+    merged_csv = args.merged_csv if args.merged_csv is not None else _default_merged_csv(args.year)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data — keep only BAs that genuinely experience the heatwave
-    df = load_merged(args.merged_csv, min_hw_frac=args.min_hw_frac)
+    df = load_merged(merged_csv, min_hw_frac=args.min_hw_frac)
 
     # Keep only perturbation members that are actually present in the data
     members_present = [m for m in PERTURBATION_MEMBERS
@@ -557,18 +578,18 @@ def main() -> None:
     reg_table = run_regression_all_members(df, members_present, PREDICTORS)
 
     # Save regression table
-    csv_out = args.output_dir / "tell_load_decomp_regression_table.csv"
+    csv_out = args.output_dir / f"tell_load_decomp_regression_table_{args.year}.csv"
     reg_table.to_csv(csv_out, index=False)
     log.info("Regression table saved → %s", csv_out)
     log.info("\n%s", reg_table.to_string(index=False))
 
     # Figure 1 — standardised coefficient chart
     log.info("Plotting standardised coefficients …")
-    plot_std_coefficients(reg_table, members_present, PREDICTORS, args.output_dir)
+    plot_std_coefficients(reg_table, members_present, PREDICTORS, args.output_dir, year=args.year)
 
     # Figure 2 — partial-regression plots
     log.info("Plotting partial-regression panels …")
-    plot_partial_regression(df, members_present, PREDICTORS, args.output_dir)
+    plot_partial_regression(df, members_present, PREDICTORS, args.output_dir, year=args.year)
 
     log.info("Done. Outputs in %s", args.output_dir)
 

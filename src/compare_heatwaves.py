@@ -61,17 +61,10 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 COMPARISON_DIR = OUTPUT_BASE_DIR / "comparison"
 
-# Label of the observational baseline member (drawn as dashed)
-OBS_LABEL = "ERA5_obs"
+# Label prefix for observational baseline members
+OBS_LABEL_PREFIX = "ERA5_obs"
 
-# X-axis limits: derived from the day range of the EAMxx members so the
-# comparison plot always zooms in to the shared analysis window.
-# EAMxx members are all non-ERA5 members; we take the union of their ranges.
-_eamxx_members = [m for m in ENSEMBLE_MEMBERS if m.data_source != OBS_LABEL]
-_eamxx_yr   = _eamxx_members[0].yr_start
-_eamxx_mon  = _eamxx_members[0].mon_start
-_XAXIS_MIN = datetime.date(_eamxx_yr, _eamxx_mon, min(m.day_start for m in _eamxx_members))
-_XAXIS_MAX = datetime.date(_eamxx_yr, _eamxx_mon, max(m.day_end   for m in _eamxx_members))
+# X-axis limits: computed per year in _get_xaxis_limits()
 
 # ---------------------------------------------------------------------------
 # Timeseries metrics to compare
@@ -107,15 +100,41 @@ TIMESERIES_METRICS: list[TimeseriesMetric] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Colour: PGW member uses MEMBER_COLORS directly;
-#         ctrl member uses the colour of its paired PGW member
+# Helper functions
+# ---------------------------------------------------------------------------
+def _get_xaxis_limits(year: int) -> tuple[datetime.date, datetime.date]:
+    """
+    Compute x-axis limits for the given year based on EAMxx member date ranges.
+    
+    Parameters
+    ----------
+    year : int — analysis year (e.g., 2011 or 2021)
+    
+    Returns
+    -------
+    tuple[datetime.date, datetime.date] — (x_min, x_max)
+    """
+    year_members = [m for m in ENSEMBLE_MEMBERS 
+                    if m.yr_start == year and not m.data_source.startswith(OBS_LABEL_PREFIX)]
+    if not year_members:
+        raise ValueError(f"No EAMxx members found for year {year}")
+    
+    yr = year_members[0].yr_start
+    mon_start = year_members[0].mon_start
+    mon_end = year_members[0].mon_end
+    x_min = datetime.date(yr, mon_start, min(m.day_start for m in year_members))
+    x_max = datetime.date(yr, mon_end, max(m.day_end for m in year_members))
+    return x_min, x_max
+
+
 def _color(src: str) -> str:
+    """Return color for the given data source."""
     if src in MEMBER_COLORS:
         return MEMBER_COLORS[src]
     return "#333333"
 
 # ---------------------------------------------------------------------------
-def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m") -> pd.DataFrame:
+def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m", year: int | None = None) -> pd.DataFrame:
     """
     Read one CSV per ensemble member for the given tag and concatenate them.
 
@@ -123,14 +142,17 @@ def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m") -> pd.DataFrame:
     ----------
     csv_tag   : str  — the tag portion of the filename
     varnames  : str  — variable name used in the filename (default 't2m')
+    year      : int | None — filter members by year (e.g., 2011 or 2021); 
+                             if None, load all members
 
     Returns
     -------
     pd.DataFrame — concatenated rows from all members, with Data_Source and
                    dayofyear columns.
     """
+    members = ENSEMBLE_MEMBERS if year is None else [m for m in ENSEMBLE_MEMBERS if m.yr_start == year]
     dfs = []
-    for member in ENSEMBLE_MEMBERS:
+    for member in members:
         yr = member.yr_start
         fname = (
             OUTPUT_BASE_DIR
@@ -153,8 +175,9 @@ def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m") -> pd.DataFrame:
         log.info("Loaded %s", fname)
 
     if not dfs:
+        year_str = f" for year {year}" if year else ""
         raise FileNotFoundError(
-            f"No CSV files found for tag '{csv_tag}'. "
+            f"No CSV files found for tag '{csv_tag}'{year_str}. "
             f"Run run_heatwave_ensemble.py first."
         )
     return pd.concat(dfs, ignore_index=True)
@@ -163,27 +186,29 @@ def load_ensemble_csvs(csv_tag: str, varnames: str = "t2m") -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 def plot_comparison(
     metric: TimeseriesMetric,
+    year: int,
     varnames: str = "t2m",
     show_obs: bool = True,
 ) -> None:
     """
-    Load CSVs for all members and save a multi-member comparison line plot.
+    Load CSVs for all members of a given year and save a multi-member comparison line plot.
 
     Styling rules
     -------------
-    * **Observation** (ERA5_obs): thick solid black line (when show_obs=True).
-    * **PGW members** (EAMxx_SSP245*): solid line.
-    * **Control members** (EAMxx_ctrl*): dashed line.
+    * **Observation** (ERA5_obs_YYYY): thick solid black line (when show_obs=True).
+    * **PGW members** (YYYY_SSP245_*): solid line.
+    * **Control members** (YYYY_CTRL_*): dashed line.
     * Each ctrl/PGW anomaly pair shares the same colour (from MEMBER_COLORS).
 
     Parameters
     ----------
     metric    : TimeseriesMetric — metric to plot.
+    year      : int              — analysis year (e.g., 2011 or 2021).
     varnames  : str              — variable name used in filenames (default 't2m').
     show_obs  : bool             — whether to include ERA5_obs in the plot
                                    (default True).
     """
-    df = load_ensemble_csvs(metric.csv_tag, varnames)
+    df = load_ensemble_csvs(metric.csv_tag, varnames, year=year)
 
     # Apply optional unit scaling (e.g. km² → million km²)
     if metric.scale != 1.0:
@@ -191,6 +216,8 @@ def plot_comparison(
         df[metric.value_col] = df[metric.value_col] * metric.scale
 
     _ctrl_members = set(ANOMALY_PAIRS.values())
+    obs_label = f"{OBS_LABEL_PREFIX}_{year}"
+    x_min, x_max = _get_xaxis_limits(year)
 
     fig, ax = plt.subplots(figsize=(11, 6))
 
@@ -198,7 +225,8 @@ def plot_comparison(
     # Build order: ctrl_0, PGW_0, ctrl_1, PGW_1, … so that the 4-column
     # legend reads "ctrl row" on top and "PGW row" on the bottom.
     _all_model = {
-        m.data_source for m in ENSEMBLE_MEMBERS if m.data_source != OBS_LABEL
+        m.data_source for m in ENSEMBLE_MEMBERS 
+        if m.yr_start == year and not m.data_source.startswith(OBS_LABEL_PREFIX)
     }
     model_sources = sorted_member_order(_all_model)
     for src in model_sources:
@@ -216,18 +244,18 @@ def plot_comparison(
 
     # ── ERA5_obs ─────────────────────────────────────────────────────────────
     if show_obs:
-        df_obs = df[df["Data_Source"] == OBS_LABEL]
+        df_obs = df[df["Data_Source"] == obs_label]
         if not df_obs.empty:
             ax.plot(
                 df_obs["date"], df_obs[metric.value_col],
-                label=display_name(OBS_LABEL),
+                label=display_name(obs_label),
                 color="black",
                 linewidth=3,
                 linestyle="-",
             )
 
     ax.set_ylabel(metric.ylabel, fontsize=FONTSIZE)
-    ax.set_xlim(_XAXIS_MIN, _XAXIS_MAX)
+    ax.set_xlim(x_min, x_max)
     ax.xaxis.set_major_locator(mdates.DayLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
     fig.autofmt_xdate(rotation=30)
@@ -242,31 +270,45 @@ def plot_comparison(
         fontsize=FONTSIZE - 1,
     )
 
-    out_path = COMPARISON_DIR / f"{metric.out_fname_tag}.png"
+    out_path = COMPARISON_DIR / f"{metric.out_fname_tag}_{year}.png"
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved comparison plot → %s", out_path)
-    out_csv = COMPARISON_DIR / f"{metric.out_fname_tag}.csv"
+    out_csv = COMPARISON_DIR / f"{metric.out_fname_tag}_{year}.csv"
     df.to_csv(out_csv, index=False)
 
 
 # ---------------------------------------------------------------------------
-def plot_longest_duration_distribution(varnames: str = "t2m") -> None:
+def plot_longest_duration_distribution(year: int, varnames: str = "t2m") -> None:
     """
     Read per-member longest-heatwave-duration CSVs and create a facet histogram
-    plot comparing each ctrl/SSP245 pair.
+    plot comparing each ctrl/SSP245 pair for the given year.
 
-    Layout: 5 rows × 1 column (one row per ANOMALY_PAIRS entry).
-    Each facet shows two overlapping histograms — ctrl (hatched) and its
-    paired SSP245 member (solid fill) — using the shared MEMBER_COLORS.
+    Layout: variable rows × 2 columns (one row per ANOMALY_PAIRS entry present in the year).
+    Each facet shows two overlapping density plots — ctrl (dashed) and its
+    paired SSP245 member (solid) — using the shared MEMBER_COLORS.
+    
+    Parameters
+    ----------
+    year     : int — analysis year (e.g., 2011 or 2021)
+    varnames : str — variable name used in filenames (default 't2m')
     """
     csv_tag = "longest_heatwave_duration"
     value_col = "longest_duration"
 
     # Load one CSV per member (ctrl + SSP245), skip missing
+    # Filter to only include members from the specified year
     member_data: dict[str, pd.Series] = {}
+    year_members = {m.data_source for m in ENSEMBLE_MEMBERS if m.yr_start == year}
+    
     for pgw, ctrl in ANOMALY_PAIRS.items():
+        # Skip pairs where neither member exists in this year
+        if pgw not in year_members and ctrl not in year_members:
+            continue
+            
         for src in (ctrl, pgw):
+            if src not in year_members:
+                continue
             yr = next(
                 (m.yr_start for m in ENSEMBLE_MEMBERS if m.data_source == src), None
             )
@@ -288,7 +330,9 @@ def plot_longest_duration_distribution(varnames: str = "t2m") -> None:
             member_data[src] = df[value_col].dropna()
             log.info("Loaded %s", fname)
 
-    pairs = list(ANOMALY_PAIRS.items())  # [(pgw, ctrl), ...]
+    # Filter to only pairs that have data loaded
+    pairs = [(pgw, ctrl) for pgw, ctrl in ANOMALY_PAIRS.items() 
+             if pgw in member_data or ctrl in member_data]
     ncols = 2
     nrows = -(-len(pairs) // ncols)  # ceiling division
 
@@ -323,11 +367,11 @@ def plot_longest_duration_distribution(varnames: str = "t2m") -> None:
     # Also label the second-to-last visible axis if nrows*ncols > len(pairs)
     if len(pairs) % ncols != 0:
         axes_flat[len(pairs) - 1].set_xlabel("Longest consecutive heatwave duration (days)", fontsize=FONTSIZE + 2)
-    fig.suptitle("Distribution of longest heatwave duration per grid cell",
+    fig.suptitle(f"Distribution of longest heatwave duration per grid cell ({year})",
                  fontsize=FONTSIZE+2, y=1.01)
     fig.tight_layout()
 
-    out_path = COMPARISON_DIR / "longest_heatwave_duration_distribution.png"
+    out_path = COMPARISON_DIR / f"longest_heatwave_duration_distribution_{year}.png"
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved duration distribution plot → %s", out_path)
@@ -337,10 +381,18 @@ def plot_longest_duration_distribution(varnames: str = "t2m") -> None:
 def main() -> None:
     COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
 
-    for metric in TIMESERIES_METRICS:
-        plot_comparison(metric, show_obs=False)
+    # Determine which years have data
+    years = sorted(set(m.yr_start for m in ENSEMBLE_MEMBERS if not m.data_source.startswith(OBS_LABEL_PREFIX)))
+    log.info("Creating comparison plots for years: %s", years)
 
-    plot_longest_duration_distribution()
+    # Create separate plots for each year
+    for year in years:
+        log.info("Processing year %d...", year)
+        
+        for metric in TIMESERIES_METRICS:
+            plot_comparison(metric, year=year, show_obs=False)
+        
+        plot_longest_duration_distribution(year=year)
 
     log.info("All comparison plots written to %s", COMPARISON_DIR)
 

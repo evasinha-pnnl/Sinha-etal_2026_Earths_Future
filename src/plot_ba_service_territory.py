@@ -401,7 +401,7 @@ if __name__ == "__main__":
     #BA_LIST = ["PJM", "MISO", "SWPP", "ERCO"]
     #BA_LIST = ["AECI", "LGEE", "SWPP", "PJM"]
     BA_LIST = ["AZPS", "PACE", "PNM", "WACM"]
-    #BA_LIST = ["AVA", "BPAT", "CHPD", "DOPD", "GCPD", "IPCO", "PACW", "PSEI", "SCL", "TPWR"]
+    BA_LIST = ["BPAT", "GCPD", "IPCO", "PACW"]
 
     COUNTY_SHP = Path(
         "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"

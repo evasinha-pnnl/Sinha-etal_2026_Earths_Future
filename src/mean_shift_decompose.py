@@ -49,7 +49,7 @@ To activate the script once suitable data is available
   1. Extend ANALYSIS_WINDOW (or supply a separate non-heatwave CSV).
   2. Remove or update this warning block in the docstring.
   3. Remove the ``raise NotImplementedError`` at the top of ``main()``.
-  4. Run:  python mean_shift_decompose.py [--output-dir DIR] [--threshold FRAC]
+  4. Run:  python mean_shift_decompose.py [--year YEAR] [--output-dir DIR] [--threshold FRAC]
 
 -------------------------------------------------------------------------------
 
@@ -77,32 +77,32 @@ For each perturbation member and each BA:
 
   Total anomaly on a heatwave day ≈ B + E.
 
-Inputs (all produced by analyze_tell_heatwave.py)
--------------------------------------------------
-``outputs/tell_heatwave_linkage/tell_load_daily_all.csv``
+Inputs (all produced by analyze_tell_heatwave.py, for the same --year)
+------------------------------------------------------------------------
+``outputs/tell_heatwave_linkage/tell_load_daily_all_<year>.csv``
     All perturbation-member daily peak-load anomalies (heatwave + non-heatwave
     days) within the analysis window.
     Columns: date, BA, data_source, peak_load, peak_load_anomaly, peak_load_ctrl
 
-``outputs/tell_heatwave_linkage/tell_heatwave_affected_bas.csv``
+``outputs/tell_heatwave_linkage/tell_heatwave_affected_bas_<year>.csv``
     Spatial-filter output: heatwave area fraction per (member, date, BA).
     Columns: data_source, date, BA, hw_area_frac
 
-Outputs (all written to OUTPUT_DIR)
-------------------------------------
-tell_mean_shift_decomp_summary.csv
+Outputs (all written to OUTPUT_DIR, named with --year)
+--------------------------------------------------------
+tell_mean_shift_decomp_summary_<year>.csv
     Per (member, BA): baseline B, mean heatwave excess E, mean total anomaly,
     fraction of total anomaly attributable to mean shift vs heatwave excess.
 
-tell_mean_shift_decomp_stacked_bar.png
+tell_mean_shift_decomp_stacked_bar_<year>.png
     Stacked bar chart — one group of bars per BA (top BAs), split into
     mean-shift baseline (grey) and heatwave excess (coloured by member).
 
-tell_mean_shift_decomp_timeseries.png
+tell_mean_shift_decomp_timeseries_<year>.png
     Daily time-series per BA × member showing total anomaly decomposed into
     the two components (stacked area plot).
 
-tell_mean_shift_decomp_fraction_bar.png
+tell_mean_shift_decomp_fraction_bar_<year>.png
     100 % stacked bar showing what fraction of the total anomaly comes from
     the mean-shift baseline vs heatwave excess, for each BA × member.
 
@@ -141,27 +141,39 @@ _SRC_DIR          = Path(__file__).parent
 _ENSEMBLE_OUTPUT  = _SRC_DIR / "outputs"
 _LINKAGE_DIR      = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
 
-DEFAULT_LOAD_CSV   = _LINKAGE_DIR / "tell_load_daily_all.csv"
-DEFAULT_FILTER_CSV = _LINKAGE_DIR / "tell_heatwave_affected_bas.csv"
+# Matches Config.year's default in analyze_tell_heatwave.py
+DEFAULT_YEAR = 2011
+
 DEFAULT_OUTPUT_DIR = _LINKAGE_DIR
+
+
+def _default_load_csv(year: int) -> Path:
+    """Path to the tell_load_daily_all_<year>.csv written by analyze_tell_heatwave.py."""
+    return _LINKAGE_DIR / f"tell_load_daily_all_{year}.csv"
+
+
+def _default_filter_csv(year: int) -> Path:
+    """Path to the tell_heatwave_affected_bas_<year>.csv written by analyze_tell_heatwave.py."""
+    return _LINKAGE_DIR / f"tell_heatwave_affected_bas_{year}.csv"
 
 # Minimum BA heatwave-area fraction to classify a BA×day as a heatwave day.
 # Should match the value used when running analyze_tell_heatwave.py.
 DEFAULT_HW_FRAC_THRESHOLD = 0.0
 
 # Perturbation members to analyse
-PERTURBATION_MEMBERS: list[str] = ["EAMxx_SSP245", "EAMxx_SSP245_p12", "EAMxx_SSP245_p24", "EAMxx_SSP245_n12", "EAMxx_SSP245_n24"]
+PERTURBATION_MEMBERS: list[str] = ["2011_SSP245_p0", "2011_SSP245_p12", "2011_SSP245_p24", "2011_SSP245_n12", "2011_SSP245_n24", "2021_SSP245_p0"]
 
 # Number of top BAs to show in summary plots (ranked by mean total anomaly)
 N_TOP_BAS = 8
 
 # Colour map for members — kept consistent with analyze_tell_heatwave.py
 MEMBER_COLORS: dict[str, str] = {
-    "EAMxx_SSP245":      "#2ca02c",   # green
-    "EAMxx_SSP245_p12":  "#d62728",   # red
-    "EAMxx_SSP245_p24":  "#9467bd",   # purple
-    "EAMxx_SSP245_n12":  "#7f7f7f",   # gray
-    "EAMxx_SSP245_n24":  "#8c564b",   # brown
+    "2011_SSP245_p0":    "#2ca02c",   # green
+    "2011_SSP245_p12":   "#d62728",   # red
+    "2011_SSP245_p24":   "#9467bd",   # purple
+    "2011_SSP245_n12":   "#7f7f7f",   # gray
+    "2011_SSP245_n24":   "#8c564b",   # brown
+    "2021_SSP245_p0":    "#1f77b4",   # blue
 }
 
 # Neutral colour for the mean-shift baseline bars
@@ -191,7 +203,8 @@ def load_inputs(
     -------
     load_daily : date, BA, data_source, peak_load_anomaly, peak_load_ctrl
     hw_flag    : date, BA, data_source, hw_area_frac, is_heatwave_day
-    """    _check_exists(load_csv,   "Full daily load CSV")
+    """
+    _check_exists(load_csv,   "Full daily load CSV")
     _check_exists(filter_csv, "Spatial filter CSV")
 
     load_daily = pd.read_csv(load_csv,   parse_dates=["date"])
@@ -322,6 +335,7 @@ def plot_stacked_bar(
     members: list[str],
     output_dir: Path,
     n_top: int = N_TOP_BAS,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Grouped stacked bar chart — mean-shift baseline vs heatwave excess.
 
@@ -387,7 +401,7 @@ def plot_stacked_bar(
     ax.tick_params(axis="y", labelsize=FONTSIZE)
     ax.set_title(
         "Mean-shift baseline vs heatwave excess — top BAs by mean total anomaly\n"
-        "July 2011  |  light blue = background warming  |  colour = heatwave-driven",
+        f"{year}  |  light blue = background warming  |  colour = heatwave-driven",
         fontsize=FONTSIZE,
     )
     # Compact legend: deduplicate
@@ -402,7 +416,7 @@ def plot_stacked_bar(
     )
     fig.tight_layout()
 
-    out = output_dir / "tell_mean_shift_decomp_stacked_bar.png"
+    out = output_dir / f"tell_mean_shift_decomp_stacked_bar_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -417,6 +431,7 @@ def plot_decomp_timeseries(
     members: list[str],
     output_dir: Path,
     n_top: int = N_TOP_BAS,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Stacked-area daily time-series per BA — one subplot per BA, per member.
 
@@ -517,12 +532,12 @@ def plot_decomp_timeseries(
     )
     fig.suptitle(
         "Daily peak-load anomaly decomposed into mean-shift baseline + heatwave excess\n"
-        "July 2011",
+        f"{year}",
         fontsize=FONTSIZE,
     )
     fig.tight_layout()
 
-    out = output_dir / "tell_mean_shift_decomp_timeseries.png"
+    out = output_dir / f"tell_mean_shift_decomp_timeseries_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -536,6 +551,7 @@ def plot_fraction_bar(
     members: list[str],
     output_dir: Path,
     n_top: int = N_TOP_BAS,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """100 % stacked bar showing fraction of |anomaly| from each component.
 
@@ -597,7 +613,7 @@ def plot_fraction_bar(
     ax.tick_params(axis="y", labelsize=FONTSIZE)
     ax.set_title(
         "Fraction of peak-load anomaly from mean-shift vs heatwave excess\n"
-        "July 2011  |  top BAs by mean absolute total anomaly",
+        f"{year}  |  top BAs by mean absolute total anomaly",
         fontsize=FONTSIZE,
     )
     handles, labels = ax.get_legend_handles_labels()
@@ -610,7 +626,7 @@ def plot_fraction_bar(
     )
     fig.tight_layout()
 
-    out = output_dir / "tell_mean_shift_decomp_fraction_bar.png"
+    out = output_dir / f"tell_mean_shift_decomp_fraction_bar_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -628,18 +644,34 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
+        "--year",
+        type=int,
+        default=DEFAULT_YEAR,
+        help=(
+            "Heatwave event/year to analyse — must match the --year used when "
+            "running analyze_tell_heatwave.py, since it determines the default "
+            "--load-csv / --filter-csv filenames."
+        ),
+    )
+    p.add_argument(
         "--load-csv",
         type=Path,
-        default=DEFAULT_LOAD_CSV,
+        default=None,
         metavar="CSV",
-        help="Path to tell_load_daily_all.csv (produced by analyze_tell_heatwave.py).",
+        help=(
+            "Path to tell_load_daily_all_<year>.csv (produced by "
+            "analyze_tell_heatwave.py). Defaults to the file for --year."
+        ),
     )
     p.add_argument(
         "--filter-csv",
         type=Path,
-        default=DEFAULT_FILTER_CSV,
+        default=None,
         metavar="CSV",
-        help="Path to tell_heatwave_affected_bas.csv (spatial filter cache).",
+        help=(
+            "Path to tell_heatwave_affected_bas_<year>.csv (spatial filter "
+            "cache). Defaults to the file for --year."
+        ),
     )
     p.add_argument(
         "--output-dir",
@@ -666,6 +698,8 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 def main() -> None:
     args = parse_args()    # parsed early so the dead code below stays valid
+    load_csv   = args.load_csv   if args.load_csv   is not None else _default_load_csv(args.year)
+    filter_csv = args.filter_csv if args.filter_csv is not None else _default_filter_csv(args.year)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     raise NotImplementedError(
@@ -680,7 +714,7 @@ def main() -> None:
 
     # Load inputs
     load_daily, hw_frac = load_inputs(
-        args.load_csv, args.filter_csv, args.threshold,
+        load_csv, filter_csv, args.threshold,
     )
 
     # Keep only perturbation members present in the data
@@ -700,20 +734,20 @@ def main() -> None:
     )
 
     # Save summary CSV
-    csv_out = args.output_dir / "tell_mean_shift_decomp_summary.csv"
+    csv_out = args.output_dir / f"tell_mean_shift_decomp_summary_{args.year}.csv"
     summary.to_csv(csv_out, index=False)
     log.info("Summary saved → %s", csv_out)
     log.info("\n%s", summary.to_string(index=False))
 
     # Figures
     log.info("Plotting stacked bar chart …")
-    plot_stacked_bar(summary, members_present, args.output_dir)
+    plot_stacked_bar(summary, members_present, args.output_dir, year=args.year)
 
     log.info("Plotting daily time-series decomposition …")
-    plot_decomp_timeseries(daily_decomp, summary, members_present, args.output_dir)
+    plot_decomp_timeseries(daily_decomp, summary, members_present, args.output_dir, year=args.year)
 
     log.info("Plotting fraction bar chart …")
-    plot_fraction_bar(summary, members_present, args.output_dir)
+    plot_fraction_bar(summary, members_present, args.output_dir, year=args.year)
 
     log.info("Done. Outputs in %s", args.output_dir)
 

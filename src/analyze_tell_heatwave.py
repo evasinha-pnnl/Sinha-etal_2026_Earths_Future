@@ -4,12 +4,26 @@ analyze_tell_heatwave.py
 Links TELL estimated electricity load to heatwave events identified by
 identify_heatwaves / run_heatwave_ensemble.
 
+Everything below is selected by a single ``--year`` CLI argument (2011 or
+2021): the TELL member directories, the perturbation↔control anomaly pairs,
+the analysis window, and the plot label all resolve together from that one
+value (see ``_resolve_hw_tell_config`` / ``_resolve_anomaly_pairs`` and the
+``Config`` dataclass), so they can't drift out of sync with each other.
+
 Workflow
 --------
-1.  Load TELL hourly load CSVs for all four EAMxx ensemble members.
-2.  Compute load anomaly = member load − ctrl (EAMxx_ctrl) load for each BA.
+1.  Load TELL hourly load CSVs for every member of the selected year's TELL
+    member set (10 members for 2011: 5 CTRL + 5 SSP245 offsets p0/p12/p24/
+    n12/n24; currently 2 active members for 2021 — CTRL_p0 and SSP245_p0 —
+    the rest are commented out in ``TELL_MEMBER_DIRS_2021`` until those
+    simulations are complete).
+2.  Compute load anomaly = perturbation member load − its *matched* control
+    load, per BA, for each (perturbation, control) pair defined for the
+    selected year, e.g. for 2011: SSP245_p0 − CTRL_p0, SSP245_p12 − CTRL_p12,
+    SSP245_p24 − CTRL_p24, SSP245_n12 − CTRL_n12, SSP245_n24 − CTRL_n24.
 3.  Load per-member heatwave event CSVs produced by run_heatwave_ensemble
-    (largest contiguous area, mean/max anomaly time series).
+    (largest contiguous area, mean/max anomaly time series), and compute the
+    heatwave-area anomaly (perturbation − matched control).
 4.  Aggregate hourly load to daily peak (max) per BA per member.
 5.  **Spatial filter**: for each perturbation member, recompute the daily
     heatwave mask on the ERA5 grid, map it onto the EAMxx native grid via
@@ -18,19 +32,38 @@ Workflow
     with active heatwave cells.  Peak-load anomaly rows for BAs that are
     *not* under the heatwave on a given day are dropped.
 6.  Merge heatwave characteristics (area, duration, mean/peak intensity) with
-    the spatially-filtered daily peak-load anomaly over the shared analysis
-    window (July 17–24).
-7.  Produce three output figures:
-    a. Time-series panel: daily peak-load anomaly per BA / member, overlaid
-       with heatwave area (twin y-axis).
-    b. Scatter matrix: peak-load anomaly vs heatwave spatial extent,
-       mean intensity, and peak intensity — one point per (BA × day),
-       coloured by member.
-    c. Bar chart: number of heatwave-affected BAs per day per member.
+    the spatially-filtered daily peak-load anomaly over the selected year's
+    analysis window.
+7.  Produce output figures and tables:
+    a. Bar chart — number of heatwave-affected BAs per day per member
+       (``plot_affected_bas_per_day``).
+    b. Per-BA peak-load-anomaly time series — one figure per (unit, BA set)
+       combination: GW / % of control, for a fixed BA set and for the BAs
+       with the largest mean anomaly (``plot_load_anomaly_timeseries_per_ba_comparison``,
+       4 figures total).
+    c. Per-BA heatwave-fraction time series — BA fractional area under the
+       heatwave per day / member (``_plot_ba_comparison_panel_affected_area``).
+    d. Scatter matrix — peak-load anomaly vs heatwave spatial extent, mean
+       intensity, and peak intensity, one point per (BA × day), coloured by
+       member, with a per-member OLS trend line (``plot_scatter_matrix``).
+    e. Correlation table — Pearson r between peak-load anomaly and each
+       heatwave characteristic, per member, saved as
+       ``tell_heatwave_correlations_<year>.csv`` (``compute_correlations``).
+
+All output figures/CSVs are named with the selected ``--year`` (e.g.
+``tell_heatwave_merged_2011.csv``, ``tell_load_vs_heatwave_scatter_2021.png``),
+so runs for different years share ``cfg.output_dir`` without overwriting
+each other.
 
 Configuration
 -------------
-Edit the constants at the top of this file (TELL_BASE, ANALYSIS_WINDOW, etc.).
+Use --year to select the heatwave event/year (2011 or 2021). Edit TELL_BASE
+or the TELL_MEMBER_DIRS_* / ANALYSIS_WINDOW_* / FIXED_BAS_*_* constants at
+the top of this file to change paths, add/re-enable members as new
+simulations complete, change which BAs are highlighted in the per-BA
+comparison plots, or add a new event/year — ANOMALY_PAIRS (in
+util_constants.py) is filtered down to whichever pairs exist in the
+selected year's TELL_MEMBER_DIRS automatically.
 
 Authors
 -------
@@ -81,12 +114,6 @@ log = logging.getLogger(__name__)
 # Configuration  ← defaults; all overridable via CLI args or env vars
 # ---------------------------------------------------------------------------
 
-# Select which heatwave event to analyse.
-# Choices:
-#   "2011" — July 2011 heatwave (July 17–24)
-#   "2021" — June–July 2021 heatwave (June 24 – July 2)
-HEATWAVE_SELECTOR = "2011"
-
 # Root directory of TELL output CSVs.
 # Override with the TELL_BASE environment variable:
 #   export TELL_BASE=/path/to/TELL_outputs
@@ -97,48 +124,83 @@ TELL_BASE = Path(os.environ.get("TELL_BASE", _TELL_BASE_DEFAULT))
 
 # ── July 2011 heatwave ──────────────────────────────────────────────────────
 TELL_MEMBER_DIRS_2011: dict[str, str] = {
-    "EAMxx_ctrl":        "EAMxx",
-    "EAMxx_ctrl_p12":    "EAMxx_p12",
-    "EAMxx_ctrl_p24":    "EAMxx_p24",
-    "EAMxx_ctrl_n12":    "EAMxx_n12",
-    "EAMxx_ctrl_n24":    "EAMxx_n24",
-    "EAMxx_SSP245":      "EAMxx_SSP245",
-    "EAMxx_SSP245_p12":  "EAMxx_SSP245_p12",
-    "EAMxx_SSP245_p24":  "EAMxx_SSP245_p24",
-    "EAMxx_SSP245_n12":  "EAMxx_SSP245_n12",
-    "EAMxx_SSP245_n24":  "EAMxx_SSP245_n24",
+    "2011_CTRL_p0":      "2011_CTRL_p0",
+    "2011_CTRL_p12":     "2011_CTRL_p12",
+    "2011_CTRL_p24":     "2011_CTRL_p24",
+    "2011_CTRL_n12":     "2011_CTRL_n12",
+    "2011_CTRL_n24":     "2011_CTRL_n24",
+    "2011_SSP245_p0":    "2011_SSP245_p0",
+    "2011_SSP245_p12":   "2011_SSP245_p12",
+    "2011_SSP245_p24":   "2011_SSP245_p24",
+    "2011_SSP245_n12":   "2011_SSP245_n12",
+    "2011_SSP245_n24":   "2011_SSP245_n24",
 }
-ANALYSIS_WINDOW_2011 = ("2011-07-17", "2011-07-24")
+ANALYSIS_WINDOW_2011 = ("2011-07-17", "2011-07-28")
 YEAR_2011            = 2011
+
+# BAs highlighted in the per-BA comparison plots (see
+# _plot_ba_comparison_panel_affected_area / _plot_ba_comparison_panel).
+#FIXED_BAS_AFFECTED_AREA_2011: list[str] = ["PJM", "MISO", "SWPP", "ERCO"]
+FIXED_BAS_AFFECTED_AREA_2011: list[str] = ["AZPS", "PACE", "PNM", "WACM"]
+FIXED_BAS_LOAD_ANOMALY_2011:  list[str] = ["AECI", "LGEE", "SWPP", "PJM"]
 
 # ── June–July 2021 heatwave (24 June – 2 July 2021) ────────────────────────
 # Update TELL subdirectory names once the 2021 TELL outputs are available.
 TELL_MEMBER_DIRS_2021: dict[str, str] = {
-    "EAMxx_ctrl":        "EAMxx_2021",           # ← update subdirectory names
-    "EAMxx_ctrl_p12":    "EAMxx_2021_p12",
-    "EAMxx_ctrl_p24":    "EAMxx_2021_p24",
-    "EAMxx_ctrl_n12":    "EAMxx_2021_n12",
-    "EAMxx_ctrl_n24":    "EAMxx_2021_n24",
-    "EAMxx_SSP245":      "EAMxx_SSP245_2021",
-    "EAMxx_SSP245_p12":  "EAMxx_SSP245_2021_p12",
-    "EAMxx_SSP245_p24":  "EAMxx_SSP245_2021_p24",
-    "EAMxx_SSP245_n12":  "EAMxx_SSP245_2021_n12",
-    "EAMxx_SSP245_n24":  "EAMxx_SSP245_2021_n24",
+    "2021_CTRL_p0":      "2021_CTRL_p0",           # ← update subdirectory names
+    # "2021_CTRL_p12":     "2021_CTRL_p12",
+    # "2021_CTRL_p24":     "2021_CTRL_p24",
+    # "2021_CTRL_n12":     "2021_CTRL_n12",
+    # "2021_CTRL_n24":     "2021_CTRL_n24",
+    "2021_SSP245_p0":    "2021_SSP245_p0",
+    # "2021_SSP245_p12":   "2021_SSP245_p12",
+    # "2021_SSP245_p24":   "2021_SSP245_p24",
+    # "2021_SSP245_n12":   "2021_SSP245_n12",
+    # "2021_SSP245_n24":   "2021_SSP245_n24",
 }
-ANALYSIS_WINDOW_2021 = ("2021-06-24", "2021-07-02")
+ANALYSIS_WINDOW_2021 = ("2021-06-24", "2021-07-10")
 YEAR_2021            = 2021
 
-# ── Active configs (resolved from HEATWAVE_SELECTOR) ───────────────────────
-_HW_TELL_CONFIGS = {
-    "2011": (TELL_MEMBER_DIRS_2011, ANALYSIS_WINDOW_2011, YEAR_2011, "July 2011"),
-    "2021": (TELL_MEMBER_DIRS_2021, ANALYSIS_WINDOW_2021, YEAR_2021, "June\u2021July 2021"),
+# BAs highlighted in the per-BA comparison plots for the 2021 heatwave.
+# Update these once the 2021 spatial filter results show which BAs are
+# under the heatwave for this event.
+FIXED_BAS_AFFECTED_AREA_2021: list[str] = ["BPAT", "GCPD", "IPCO", "PACW"]
+FIXED_BAS_LOAD_ANOMALY_2021:  list[str] = ["BPAT", "GCPD", "IPCO", "PACW"]
+
+# ── Per-year configs, selected at runtime via --year (see Config / main()) ──
+_HW_TELL_CONFIGS: dict[int, tuple[dict[str, str], tuple[str, str], str, list[str], list[str]]] = {
+    YEAR_2011: (
+        TELL_MEMBER_DIRS_2011, ANALYSIS_WINDOW_2011, "July 2011",
+        FIXED_BAS_AFFECTED_AREA_2011, FIXED_BAS_LOAD_ANOMALY_2011,
+    ),
+    YEAR_2021: (
+        TELL_MEMBER_DIRS_2021, ANALYSIS_WINDOW_2021, "June–July 2021",
+        FIXED_BAS_AFFECTED_AREA_2021, FIXED_BAS_LOAD_ANOMALY_2021,
+    ),
 }
-if HEATWAVE_SELECTOR not in _HW_TELL_CONFIGS:
-    raise ValueError(
-        f"Unknown HEATWAVE_SELECTOR '{HEATWAVE_SELECTOR}'. "
-        f"Valid choices: {list(_HW_TELL_CONFIGS)}"
-    )
-TELL_MEMBER_DIRS, ANALYSIS_WINDOW, YEAR, HW_LABEL = _HW_TELL_CONFIGS[HEATWAVE_SELECTOR]
+
+
+def _resolve_hw_tell_config(
+    year: int,
+) -> tuple[dict[str, str], tuple[str, str], str, list[str], list[str]]:
+    """Return (tell_member_dirs, analysis_window, hw_label,
+    fixed_bas_affected_area, fixed_bas_load_anomaly) for *year*."""
+    if year not in _HW_TELL_CONFIGS:
+        raise ValueError(
+            f"Unknown year {year} for TELL/heatwave configuration. "
+            f"Valid choices: {sorted(_HW_TELL_CONFIGS)}"
+        )
+    return _HW_TELL_CONFIGS[year]
+
+
+def _resolve_anomaly_pairs(tell_member_dirs: dict[str, str]) -> dict[str, str]:
+    """Restrict ANOMALY_PAIRS to the perturbation/control pairs present in
+    *tell_member_dirs*, so functions that loop over anomaly pairs don't pull
+    in members from a different heatwave event/year."""
+    return {
+        pert: ctrl for pert, ctrl in ANOMALY_PAIRS.items()
+        if pert in tell_member_dirs and ctrl in tell_member_dirs
+    }
 
 # Heatwave ensemble output root (produced by run_heatwave_ensemble.py)
 ENSEMBLE_OUTPUT = Path(__file__).parent / "outputs"
@@ -180,14 +242,29 @@ HW_BA_FRAC_THRESHOLD = 0.8
 class Config:
     """Holds all runtime-configurable settings for one analysis run.
 
-    Functions that previously read module-level globals (YEAR, OUTPUT_DIR, …)
-    now accept a ``Config`` instance, which makes them safe to call from tests
-    or other scripts without mutating global state.
+    Functions that previously read module-level globals (TELL_MEMBER_DIRS,
+    ANALYSIS_WINDOW, HW_LABEL, ANOMALY_PAIRS, …) now accept a ``Config``
+    instance, which makes them safe to call from tests or other scripts
+    without mutating global state — and keeps the member set, analysis
+    window, and label consistent with ``year`` instead of drifting from a
+    separate hardcoded selector.
     """
-    year:               int  = YEAR
+    year:                 int   = YEAR_2011
     hw_ba_frac_threshold: float = HW_BA_FRAC_THRESHOLD
-    tell_base:          Path = field(default_factory=lambda: TELL_BASE)
-    output_dir:         Path = field(default_factory=lambda: ENSEMBLE_OUTPUT / "tell_heatwave_linkage")
+    tell_base:            Path  = field(default_factory=lambda: TELL_BASE)
+    output_dir:           Path  = field(default_factory=lambda: ENSEMBLE_OUTPUT / "tell_heatwave_linkage")
+    tell_member_dirs:     dict[str, str]  = field(default_factory=lambda: TELL_MEMBER_DIRS_2011)
+    analysis_window:      tuple[str, str] = ANALYSIS_WINDOW_2011
+    hw_label:             str = "July 2011"
+    anomaly_pairs:        dict[str, str]  = field(
+        default_factory=lambda: _resolve_anomaly_pairs(TELL_MEMBER_DIRS_2011)
+    )
+    fixed_bas_affected_area: list[str] = field(
+        default_factory=lambda: list(FIXED_BAS_AFFECTED_AREA_2011)
+    )
+    fixed_bas_load_anomaly:  list[str] = field(
+        default_factory=lambda: list(FIXED_BAS_LOAD_ANOMALY_2011)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +275,12 @@ def load_tell_all_members(cfg: Config) -> pd.DataFrame:
     Read all BA CSVs for every member and return a single DataFrame with
     columns: Time_UTC, Load, BA, data_source.
 
-    Only hours within ANALYSIS_WINDOW are kept.
+    Only hours within cfg.analysis_window are kept.
     """
     dfs: list[pd.DataFrame] = []
-    t_start, t_end = ANALYSIS_WINDOW
+    t_start, t_end = cfg.analysis_window
 
-    for data_source, subdir in TELL_MEMBER_DIRS.items():
+    for data_source, subdir in cfg.tell_member_dirs.items():
         tell_dir = cfg.tell_base / subdir / str(cfg.year)
         csv_files = sorted(tell_dir.glob(f"*_{cfg.year}_mlp_output.csv"))
         if not csv_files:
@@ -227,7 +304,7 @@ def load_tell_all_members(cfg: Config) -> pd.DataFrame:
 
     if not dfs:
         raise FileNotFoundError(
-            f"No TELL data loaded. Check TELL_BASE={cfg.tell_base} and ANALYSIS_WINDOW."
+            f"No TELL data loaded. Check TELL_BASE={cfg.tell_base} and cfg.analysis_window."
         )
     return pd.concat(dfs, ignore_index=True)
 
@@ -235,22 +312,23 @@ def load_tell_all_members(cfg: Config) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Step 2 – Compute load anomaly (perturbation − its matched control)
 # ---------------------------------------------------------------------------
-def compute_load_anomaly(tell_df: pd.DataFrame) -> pd.DataFrame:
+def compute_load_anomaly(tell_df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """
     For each perturbation member, compute load_anomaly against its matched
-    control as defined in ANOMALY_PAIRS:
+    control as defined in cfg.anomaly_pairs (ANOMALY_PAIRS restricted to the
+    members of the active year's TELL_MEMBER_DIRS), e.g. for 2011:
 
-        EAMxx_SSP245     − EAMxx_ctrl
-        EAMxx_SSP245_p12 − EAMxx_ctrl_p12
-        EAMxx_SSP245_p24 − EAMxx_ctrl_p24
-        EAMxx_SSP245_n12 − EAMxx_ctrl_n12
-        EAMxx_SSP245_n24 − EAMxx_ctrl_n24
+        2011_SSP245_p0   − 2011_CTRL_p0
+        2011_SSP245_p12  − 2011_CTRL_p12
+        2011_SSP245_p24  − 2011_CTRL_p24
+        2011_SSP245_n12  − 2011_CTRL_n12
+        2011_SSP245_n24  − 2011_CTRL_n24
 
     Returns only the perturbation rows with an added ``load_anomaly`` column.
     """
     result_dfs: list[pd.DataFrame] = []
 
-    for pert_member, ctrl_member in ANOMALY_PAIRS.items():
+    for pert_member, ctrl_member in cfg.anomaly_pairs.items():
         ctrl = (
             tell_df[tell_df["data_source"] == ctrl_member]
             [["Time_UTC", "BA", "Load"]]
@@ -304,7 +382,7 @@ def load_heatwave_characteristics(cfg: Config) -> pd.DataFrame:
                               area (analogous to hw_mean_K / hw_max_K).
     """
     rows: list[pd.DataFrame] = []
-    for data_source, ctrl_source in ANOMALY_PAIRS.items():
+    for data_source, ctrl_source in cfg.anomaly_pairs.items():
         area_df      = _load_hw_csv(data_source, HW_AREA_TAG, HW_AREA_COL, cfg)
         ctrl_area_df = _load_hw_csv(ctrl_source,  HW_AREA_TAG, HW_AREA_COL, cfg)
         mean_df      = _load_hw_csv(data_source, HW_MEAN_TAG, HW_MEAN_COL, cfg)
@@ -400,10 +478,10 @@ def _cell_index_to_latlon(
 def _load_eamxx_grid_coords() -> tuple[np.ndarray, np.ndarray]:
     """Read lat/lon coordinate arrays from the first EAMxx file on disk.
 
-    Uses EAMxx_ctrl as the reference member — all members share the same
+    Uses 2011_CTRL_p0  as the reference member — all members share the same
     native grid, so any member would work.
     """
-    member = _MEMBER_LOOKUP["EAMxx_ctrl"]
+    member = _MEMBER_LOOKUP["2011_CTRL_p0"]
     fpath = Path(EAMXX_BASE_PATH) / member.subdir
     nc_files = sorted(fpath.glob(f"{member.fname_abb}*.nc"))
     if not nc_files:
@@ -682,19 +760,15 @@ def _plot_ba_comparison_panel_affected_area(
     Parameters
     ----------
     spatial_filter:  dict[str, dict[str, dict[str, float]]],
-    bas             : Explicit list of BA codes to show (default: AECI, LGEE,
-                      SWPP, PJM).
+    bas             : Explicit list of BA codes to show (default:
+                      cfg.fixed_bas_affected_area).
     fname_suffix    : String appended before ``.png`` to distinguish outputs.
     subtitle        : Optional subtitle line.
     """
-    #FIXED_BAS: list[str] = ["PJM", "MISO", "SWPP", "ERCO"]
-    #FIXED_BAS: list[str] = ["AECI", "LGEE", "SWPP", "PJM"]
-    FIXED_BAS: list[str] = ["AZPS", "PACE", "PNM", "WACM"]
-    top_bas = bas if bas is not None else FIXED_BAS
-    members = list(ANOMALY_PAIRS)
+    top_bas = bas if bas is not None else cfg.fixed_bas_affected_area
     n_bas   = len(top_bas)
 
-    _ctrl_members = set(ANOMALY_PAIRS.values())
+    _ctrl_members = set(cfg.anomaly_pairs.values())
     _cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     def _color(member: str, idx: int) -> str:
@@ -754,7 +828,7 @@ def _plot_ba_comparison_panel_affected_area(
                 markersize=3,
                 label=display_name(member)
             )
-            if row == 0:
+            if display_name(member) not in legend_labels:
                 legend_handles.append(line)
                 legend_labels.append(display_name(member))
 
@@ -768,16 +842,22 @@ def _plot_ba_comparison_panel_affected_area(
 
     axes[-1, 0].xaxis.set_tick_params(rotation=30)
 
-    fname = f"ba_comparison{fname_suffix}.png"
+    fname = f"ba_comparison{fname_suffix}_{cfg.year}.png"
 
-    fig.legend(
-        legend_handles, legend_labels,
-        loc="lower center",
-        ncol=min(5, len(legend_handles)),
-        fontsize=FONTSIZE,
-        frameon=True,
-        bbox_to_anchor=(0.5, -0.02),
-    )
+    if subtitle:
+        fig.suptitle(subtitle, fontsize=FONTSIZE)
+
+    if legend_handles:
+        fig.legend(
+            legend_handles, legend_labels,
+            loc="lower center",
+            ncol=min(5, len(legend_handles)),
+            fontsize=FONTSIZE,
+            frameon=True,
+            bbox_to_anchor=(0.5, -0.02),
+        )
+    else:
+        log.warning("No data for any BA in %s; skipping legend for %s", top_bas, fname)
 
     out = cfg.output_dir / fname
     fig.savefig(out, bbox_inches="tight")
@@ -809,14 +889,13 @@ def _plot_ba_comparison_panel(
     hw_chars        : Accepted for API compatibility; not plotted here.
     spatial_filter  : Accepted for API compatibility; not used here.
     as_pct          : If True plot anomaly as % of control; otherwise in GW.
-    bas             : Explicit list of BA codes to show (default: AECI, LGEE,
-                      SWPP, PJM).
+    bas             : Explicit list of BA codes to show (default:
+                      cfg.fixed_bas_load_anomaly).
     fname_suffix    : String appended before ``.png`` to distinguish outputs.
     subtitle        : Optional subtitle line.
     """
-    FIXED_BAS: list[str] = ["AECI", "LGEE", "SWPP", "PJM"]
-    top_bas = bas if bas is not None else FIXED_BAS
-    members = list(ANOMALY_PAIRS)
+    top_bas = bas if bas is not None else cfg.fixed_bas_load_anomaly
+    members = list(cfg.anomaly_pairs)
     n_bas   = len(top_bas)
 
     _cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -868,7 +947,7 @@ def _plot_ba_comparison_panel(
                 markersize=3,
                 label=display_name(member)
             )
-            if row == 0:
+            if display_name(member) not in legend_labels:
                 legend_handles.append(line)
                 legend_labels.append(display_name(member))
 
@@ -883,18 +962,24 @@ def _plot_ba_comparison_panel(
     axes[-1, 0].xaxis.set_tick_params(rotation=30)
 
     if as_pct:
-        fname = f"tell_load_anomaly_pct_timeseries_per_ba_comparison{fname_suffix}.png"
+        fname = f"tell_load_anomaly_pct_timeseries_per_ba_comparison{fname_suffix}_{cfg.year}.png"
     else:
-        fname = f"tell_load_anomaly_timeseries_per_ba_comparison{fname_suffix}.png"
+        fname = f"tell_load_anomaly_timeseries_per_ba_comparison{fname_suffix}_{cfg.year}.png"
 
-    fig.legend(
-        legend_handles, legend_labels,
-        loc="lower center",
-        ncol=min(3, len(legend_handles)),
-        fontsize=FONTSIZE,
-        frameon=True,
-        bbox_to_anchor=(0.5, -0.02),
-    )
+    if subtitle:
+        fig.suptitle(subtitle, fontsize=FONTSIZE)
+
+    if legend_handles:
+        fig.legend(
+            legend_handles, legend_labels,
+            loc="lower center",
+            ncol=min(3, len(legend_handles)),
+            fontsize=FONTSIZE,
+            frameon=True,
+            bbox_to_anchor=(0.5, -0.02),
+        )
+    else:
+        log.warning("No data for any BA in %s; skipping legend for %s", top_bas, fname)
 
     out = cfg.output_dir / fname
     fig.savefig(out, bbox_inches="tight")
@@ -932,7 +1017,7 @@ def plot_load_anomaly_timeseries_per_ba_comparison(
     )
 
     # ── Pair 2: BAs with largest mean absolute peak-load anomaly ────────────
-    members = list(ANOMALY_PAIRS)
+    members = list(cfg.anomaly_pairs)
     top_anom_bas = _top_bas_by_peak_anomaly(load_anom_daily, members, n=4)
     if top_anom_bas:
         _plot_ba_comparison_panel(
@@ -970,7 +1055,7 @@ def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
         ("hw_max_K",            "Heatwave peak intensity (K)",                  1.0),
     ]
 
-    members = list(ANOMALY_PAIRS)   # perturbation members only
+    members = list(cfg.anomaly_pairs)   # perturbation members only
 
     fig, axes = plt.subplots(1, len(characteristics), figsize=(6 * len(characteristics), 5))
 
@@ -1023,13 +1108,13 @@ def plot_scatter_matrix(merged: pd.DataFrame, cfg: Config) -> None:
     )
 
     fig.suptitle(
-        f"Peak-load anomaly vs heatwave characteristics — {HW_LABEL}\n"
+        f"Peak-load anomaly vs heatwave characteristics — {cfg.hw_label}\n"
         "(each point = one BA × day; dashed = OLS trend per member)",
         fontsize=FONTSIZE,
     )
     fig.tight_layout()
 
-    out = cfg.output_dir / "tell_load_vs_heatwave_scatter.png"
+    out = cfg.output_dir / f"tell_load_vs_heatwave_scatter_{cfg.year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -1051,7 +1136,7 @@ def compute_correlations(merged: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         "hw_max_K":            "Peak intensity",
     }
     rows = []
-    for member in ANOMALY_PAIRS:   # perturbation members only
+    for member in cfg.anomaly_pairs:   # perturbation members only
         sub = merged[merged["data_source"] == member].dropna(
             subset=list(hw_cols.keys()) + ["peak_load_anomaly"]
         )
@@ -1063,7 +1148,7 @@ def compute_correlations(merged: pd.DataFrame, cfg: Config) -> pd.DataFrame:
             rows.append({"Member": member, "HW characteristic": label, "Pearson r": round(r, 3)})
 
     corr_df = pd.DataFrame(rows)
-    out_csv = cfg.output_dir / "tell_heatwave_correlations.csv"
+    out_csv = cfg.output_dir / f"tell_heatwave_correlations_{cfg.year}.csv"
     corr_df.to_csv(out_csv, index=False)
     log.info("Correlation table saved → %s", out_csv)
     log.info("\n%s", corr_df.to_string(index=False))
@@ -1103,7 +1188,7 @@ def plot_affected_bas_per_day(
     bar_width = 0.8 / n_members          # total group width ≈ 0.8
     x = np.arange(n_dates)
 
-    _ctrl_members = set(ANOMALY_PAIRS.values())
+    _ctrl_members = set(cfg.anomaly_pairs.values())
 
     for i, member in enumerate(members):
         sub = df[df["data_source"] == member].set_index("date").reindex(dates)
@@ -1127,7 +1212,7 @@ def plot_affected_bas_per_day(
     ax.set_xticklabels([d.strftime("%Y-%m-%d") for d in dates], rotation=30)
     ax.set_ylabel("Number of BAs under heatwave", fontsize=FONTSIZE)
     ax.set_title(
-        f"Threshold: fraction in heatwave > {cfg.hw_ba_frac_threshold:.2f}  |  July 2011\n",
+        f"Threshold: fraction in heatwave > {cfg.hw_ba_frac_threshold:.2f}  |  {cfg.hw_label}\n",
         fontsize=FONTSIZE,
     )
 
@@ -1141,11 +1226,11 @@ def plot_affected_bas_per_day(
     )
     fig.tight_layout()
 
-    out = cfg.output_dir / f"tell_affected_bas_per_day_{cfg.hw_ba_frac_threshold}.png"
+    out = cfg.output_dir / f"tell_affected_bas_per_day_{cfg.year}_{cfg.hw_ba_frac_threshold}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
-    out_csv = cfg.output_dir / f"tell_affected_bas_per_day_{cfg.hw_ba_frac_threshold}.csv"
+    out_csv = cfg.output_dir / f"tell_affected_bas_per_day_{cfg.year}_{cfg.hw_ba_frac_threshold}.csv"
     df.to_csv(out_csv, index=False)
 
 
@@ -1165,8 +1250,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--year",
         type=int,
-        default=YEAR,
-        help="Simulation year (used to locate TELL CSVs and heatwave output).",
+        default=YEAR_2011,
+        choices=sorted(_HW_TELL_CONFIGS),
+        help=(
+            "Heatwave event/year to analyse — selects the TELL member "
+            "directories, analysis window, and label (used to locate TELL "
+            "CSVs and heatwave output)."
+        ),
     )
     p.add_argument(
         "--threshold",
@@ -1210,19 +1300,36 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    # Resolve the TELL member set / analysis window / label for the selected
+    # year, and restrict ANOMALY_PAIRS to that year's members, so every
+    # downstream function is consistent with args.year instead of a
+    # separately hardcoded selector.
+    (
+        tell_member_dirs, analysis_window, hw_label,
+        fixed_bas_affected_area, fixed_bas_load_anomaly,
+    ) = _resolve_hw_tell_config(args.year)
+    anomaly_pairs = _resolve_anomaly_pairs(tell_member_dirs)
+
     # Build a Config from CLI args; no module-level globals are mutated.
     cfg = Config(
-        year                 = args.year,
-        hw_ba_frac_threshold = args.threshold,
-        tell_base            = args.tell_base,
-        output_dir           = args.output_dir
-                               if args.output_dir is not None
-                               else ENSEMBLE_OUTPUT / "tell_heatwave_linkage",
+        year                    = args.year,
+        hw_ba_frac_threshold    = args.threshold,
+        tell_base               = args.tell_base,
+        output_dir              = args.output_dir
+                                  if args.output_dir is not None
+                                  else ENSEMBLE_OUTPUT / "tell_heatwave_linkage",
+        tell_member_dirs        = tell_member_dirs,
+        analysis_window         = analysis_window,
+        hw_label                = hw_label,
+        anomaly_pairs           = anomaly_pairs,
+        fixed_bas_affected_area = fixed_bas_affected_area,
+        fixed_bas_load_anomaly  = fixed_bas_load_anomaly,
     )
 
     log.info(
-        "Configuration: year=%d  threshold=%.2f  tell_base=%s  output_dir=%s",
-        cfg.year, cfg.hw_ba_frac_threshold, cfg.tell_base, cfg.output_dir,
+        "Configuration: year=%d (%s)  threshold=%.2f  tell_base=%s  output_dir=%s  members=%s",
+        cfg.year, cfg.hw_label, cfg.hw_ba_frac_threshold, cfg.tell_base, cfg.output_dir,
+        list(cfg.tell_member_dirs),
     )
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1233,9 +1340,9 @@ def main() -> None:
     # 2. Compute load anomaly (each perturbation − its matched control)
     log.info(
         "Computing load anomalies: %s",
-        ", ".join(f"{p} − {c}" for p, c in ANOMALY_PAIRS.items()),
+        ", ".join(f"{p} − {c}" for p, c in cfg.anomaly_pairs.items()),
     )
-    tell_anom = compute_load_anomaly(tell_df)
+    tell_anom = compute_load_anomaly(tell_df, cfg)
 
     # 3. Aggregate to daily peak
     log.info("Aggregating to daily peak load …")
@@ -1246,9 +1353,9 @@ def main() -> None:
     hw_chars = load_heatwave_characteristics(cfg)
 
     # 5. Spatial filtering: keep only BAs overlapping the heatwave per day
-    all_members = list(TELL_MEMBER_DIRS.keys())          # all 4 members
-    perturbation_members = list(ANOMALY_PAIRS.keys())    # perturbation only
-    filter_csv = cfg.output_dir / "tell_heatwave_affected_bas.csv"
+    all_members = list(cfg.tell_member_dirs.keys())          # all members for this year
+    perturbation_members = list(cfg.anomaly_pairs.keys())    # perturbation only
+    filter_csv = cfg.output_dir / f"tell_heatwave_affected_bas_{cfg.year}.csv"
 
     if filter_csv.exists():
         # ── Validate cached spatial filter ──────────────────────────────────
@@ -1263,8 +1370,8 @@ def main() -> None:
         else:
             # Guard 2: cached CSV was built with a different (smaller) member
             # set — e.g. new ensemble members have been added since the last
-            # run.  Any member in TELL_MEMBER_DIRS that is absent from the
-            # cache means we must rebuild.
+            # run.  Any member in cfg.tell_member_dirs that is absent from
+            # the cache means we must rebuild.
             _cached_members = set(pd.read_csv(filter_csv, usecols=["data_source"])["data_source"])
             _expected_members = set(all_members)
             _missing = _expected_members - _cached_members
@@ -1274,6 +1381,29 @@ def main() -> None:
                     "deleting and recomputing.", sorted(_missing)
                 )
                 filter_csv.unlink()
+
+#    if filter_csv.exists():
+#        # Guard 3: cached CSV doesn't cover the full analysis window — e.g.
+#        # more simulation days were added for an existing member since the
+#        # cache was built (member set unchanged, so Guard 2 wouldn't catch
+#        # this).
+#        _cached_dates = pd.read_csv(filter_csv, usecols=["data_source", "date"])
+#        _cached_dates["date"] = pd.to_datetime(_cached_dates["date"])
+#        _window_start = pd.Timestamp(analysis_window[0])
+#        _window_end = pd.Timestamp(analysis_window[1])
+#        _stale_members = [
+#            member for member in all_members
+#            if (_mdates := _cached_dates.loc[_cached_dates["data_source"] == member, "date"]).empty
+#            or _mdates.max() < _window_end
+#            or _mdates.min() > _window_start
+#        ]
+#        if _stale_members:
+#            log.warning(
+#                "Cached spatial filter does not cover the full analysis "
+#                "window %s for members %s — deleting and recomputing.",
+#                analysis_window, _stale_members,
+#            )
+#            filter_csv.unlink()
 
     if filter_csv.exists():
         log.info(
@@ -1316,14 +1446,14 @@ def main() -> None:
 
     # Save full (unfiltered) daily peak-load anomaly for downstream analysis
     # (needed by mean-shift decomposition in mean_shift_decompose.py)
-    load_daily_csv = cfg.output_dir / "tell_load_daily_all.csv"
+    load_daily_csv = cfg.output_dir / f"tell_load_daily_all_{cfg.year}.csv"
     load_daily[load_daily["data_source"].isin(perturbation_members)].to_csv(
         load_daily_csv, index=False
     )
     log.info("Full daily load saved → %s", load_daily_csv)
 
     # Save merged table for further analysis
-    merged_csv = cfg.output_dir / "tell_heatwave_merged.csv"
+    merged_csv = cfg.output_dir / f"tell_heatwave_merged_{cfg.year}.csv"
     merged.to_csv(merged_csv, index=False)
     log.info("Merged data saved → %s", merged_csv)
 

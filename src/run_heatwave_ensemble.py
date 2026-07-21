@@ -6,25 +6,28 @@ Loops over PGW ensemble members and runs the full heatwave analysis pipeline
 
 Ensemble members
 ----------------
-Five members are currently defined:
+Thirteen members are currently defined:
 
-  ERA5 observational baseline:
-    ERA5_obs  — ERA5 July 2011, days 1–31, from ERA5_HIST_CONFIG path
+  ERA5 observational baselines:
+    ERA5_obs_2011  — ERA5 July 2011, days 1–31, from ERA5_HIST_CONFIG path
+    ERA5_obs_2021  — ERA5 June 26 – July 10, 2021, from ERA5_HIST_CONFIG path
 
   EAMxx PGW simulations under /pscratch/sd/j/jli628/EAMxx_regridding/:
 
   Member name           Subdir
   ─────────────────     ───────────────────────────
-  EAMxx_ctrl            heatwave_201107/
-  EAMxx_ctrl_p12        heatwave_201107_p12/
-  EAMxx_ctrl_p24        heatwave_201107_p24/
-  EAMxx_ctrl_n12        heatwave_201107_n12/
-  EAMxx_ctrl_n24        heatwave_201107_n24/
-  EAMxx_SSP245          heatwave_201107_SSP245/
-  EAMxx_SSP245_p12      heatwave_201107_SSP245_p12/
-  EAMxx_SSP245_p24      heatwave_201107_SSP245_p24/
-  EAMxx_SSP245_n12      heatwave_201107_SSP245_n12/
-  EAMxx_SSP245_n24      heatwave_201107_SSP245_n24/
+  2011_CTRL_p0          heatwave_201107/
+  2011_CTRL_p12         heatwave_201107_p12/
+  2011_CTRL_p24         heatwave_201107_p24/
+  2011_CTRL_n12         heatwave_201107_n12/
+  2011_CTRL_n24         heatwave_201107_n24/
+  2011_SSP245_p0        heatwave_201107_SSP245/
+  2011_SSP245_p12       heatwave_201107_SSP245_p12/
+  2011_SSP245_p24       heatwave_201107_SSP245_p24/
+  2011_SSP245_n12       heatwave_201107_SSP245_n12/
+  2011_SSP245_n24       heatwave_201107_SSP245_n24/
+  2021_CTRL_p0          Heatwave_2021/CTRL/p0/
+  2021_SSP245_p0        Heatwave_2021/SSP245/p0/
 
   EAMxx members share:
     • fname_abb  = output.eamxx.INSTANT.nsteps_x9.
@@ -39,8 +42,8 @@ Output
 Usage
 -----
   python run_heatwave_ensemble.py                            # run all members (parallel)
-  python run_heatwave_ensemble.py EAMxx_ctrl                 # run one specific member
-  python run_heatwave_ensemble.py EAMxx_ctrl EAMxx_SSP245    # run a subset
+  python run_heatwave_ensemble.py 2011_CTRL_p0                 # run one specific member
+  python run_heatwave_ensemble.py 2011_CTRL_p0 2011_SSP245_p0    # run a subset
   python run_heatwave_ensemble.py --workers 2                # limit parallel workers
 
 Authors
@@ -71,6 +74,7 @@ from identify_heatwaves import (
     load_and_prepare_era5,
     plot_frequency,
     plot_max_anomaly,
+    plot_daily_anomaly_panels,
     plot_largest_contiguous_region,
     plot_longest_duration,
     plot_event_scatter,
@@ -143,52 +147,147 @@ class EnsembleMember:
 
 
 ENSEMBLE_MEMBERS: list[EnsembleMember] = [
-    # ERA5 observational baseline (subdir="" signals the ERA5 obs path)
+    # ERA5 observational baseline for 2011 heatwave (subdir="" signals the ERA5 obs path)
     EnsembleMember(
-        data_source = "ERA5_obs",
+        data_source = "ERA5_obs_2011",
         subdir      = "",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
         day_start   = 1,    # ERA5 has full month coverage; no spin-up to skip
         day_end     = 31,
     ),
+    # ERA5 observational baseline for 2021 heatwave
     EnsembleMember(
-        data_source = "EAMxx_ctrl",
+        data_source = "ERA5_obs_2021",
+        subdir      = "",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 10,
+    ),
+    EnsembleMember(
+        data_source = "2011_CTRL_p0",
         subdir      = "heatwave_201107/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 28,
     ),
     EnsembleMember(
-        data_source = "EAMxx_ctrl_p12",
+        data_source = "2011_CTRL_p12",
         subdir      = "heatwave_201107_p12/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_ctrl_p24",
+        data_source = "2011_CTRL_p24",
         subdir      = "heatwave_201107_p24/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_ctrl_n12",
+        data_source = "2011_CTRL_n12",
         subdir      = "heatwave_201107_n12/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_ctrl_n24",
+        data_source = "2011_CTRL_n24",
         subdir      = "heatwave_201107_n24/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_SSP245",
+        data_source = "2011_SSP245_p0",
         subdir      = "heatwave_201107_SSP245/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 29,
     ),
     EnsembleMember(
-        data_source = "EAMxx_SSP245_p12",
+        data_source = "2011_SSP245_p12",
         subdir      = "heatwave_201107_SSP245_p12/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_SSP245_p24",
+        data_source = "2011_SSP245_p24",
         subdir      = "heatwave_201107_SSP245_p24/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_SSP245_n12",
+        data_source = "2011_SSP245_n12",
         subdir      = "heatwave_201107_SSP245_n12/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
     ),
     EnsembleMember(
-        data_source = "EAMxx_SSP245_n24",
+        data_source = "2011_SSP245_n24",
         subdir      = "heatwave_201107_SSP245_n24/",
+        yr_start    = 2011,
+        yr_end      = 2011,
+        mon_start   = 7,
+        mon_end     = 7,
+        day_start   = 17,
+        day_end     = 24,
+    ),
+    EnsembleMember(
+        data_source = "2021_CTRL_p0",
+        subdir      = "Heatwave_2021/CTRL/p0/",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 10,
+    ),
+    EnsembleMember(
+        data_source = "2021_SSP245_p0",
+        subdir      = "Heatwave_2021/SSP245/p0/",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 10,
     ),
 ]
 
@@ -276,6 +375,13 @@ def run_member(member: EnsembleMember, output_base: Path) -> bool:
             analysis_cfg, FIG_EXTENT, member.data_source,
             output_dir=member_dir,
         )
+        
+        # ---- step 8b: daily anomaly panels ----------------------------------
+        plot_daily_anomaly_panels(
+            anomaly, member.varnames,
+            analysis_cfg, FIG_EXTENT, member.data_source,
+            output_dir=member_dir,
+        )
 
         # ---- step 9: largest contiguous region per day ---------------------
         plot_largest_contiguous_region(
@@ -316,7 +422,7 @@ def main() -> None:
     Run the ensemble in parallel.  Optionally pass member data_source labels
     as command-line arguments to process only a subset, e.g.:
 
-        python run_heatwave_ensemble.py EAMxx_ctrl EAMxx_SSP245
+        python run_heatwave_ensemble.py 2011_CTRL_p0 2011_SSP245_p0
         python run_heatwave_ensemble.py --workers 2
     """
     OUTPUT_BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -330,7 +436,7 @@ def main() -> None:
         nargs="*",
         metavar="MEMBER",
         help=(
-            "Data-source label(s) to run (e.g. EAMxx_ctrl EAMxx_SSP245). "
+            "Data-source label(s) to run (e.g. 2011_CTRL_p0 2011_SSP245_p0). "
             "Omit to run all members."
         ),
     )

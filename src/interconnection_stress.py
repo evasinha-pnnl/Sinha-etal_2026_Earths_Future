@@ -31,8 +31,9 @@ Analysis B — Daily co-occurrence index
 
 Inputs
 ------
-``outputs/tell_heatwave_linkage/tell_heatwave_merged.csv``
-    Per-BA daily peak-load anomaly on heatwave days, all members.
+``outputs/tell_heatwave_linkage/tell_heatwave_merged_<year>.csv``
+    Per-BA daily peak-load anomaly on heatwave days, all members, for the
+    selected --year (produced by ``analyze_tell_heatwave.py --year <year>``).
     Columns: date, BA, data_source, peak_load, peak_load_anomaly,
              peak_load_ctrl, hw_area_frac, hw_area_anomaly_km2,
              hw_mean_K, hw_max_K
@@ -41,40 +42,41 @@ Inputs
 ``BA_to_Interconnection_Mapping.csv``  (tracked in the repo root)
     Static lookup: BA_Code → Interconnection (EIC | WECC | ERCOT).
 
-Outputs (all written to OUTPUT_DIR)
-------------------------------------
-tell_interconnection_load_anomaly_GW.csv
+Outputs (all written to OUTPUT_DIR, named with --year)
+---------------------------------------------------------
+tell_interconnection_load_anomaly_GW_<year>.csv
     Per (date, interconnection, data_source): sum_anomaly_GW, sum_ctrl_GW,
     anomaly_pct.
 
-tell_interconnection_load_anomaly_timeseries.png
+tell_interconnection_load_anomaly_timeseries_<year>.png
     Three-panel time-series (one per interconnection) — perturbation and
     control lines, GW anomaly.
 
-tell_interconnection_load_anomaly_timeseries_pct.png
+tell_interconnection_load_anomaly_timeseries_pct_<year>.png
     Same as above, expressed as % of control load.
 
-tell_interconnection_load_absolute_timeseries.png
-    Three-panel time-series (one per interconnection) — six lines per panel:
-    SSP245 pert (solid),     SSP245 ctrl (dashed),
-    SSP245_p12 pert (solid), SSP245_p12 ctrl (dashed).
-    SSP245_p24 pert (solid), SSP245_p24 ctrl (dashed).
-    SSP245_n12 pert (solid), SSP245_n12 ctrl (dashed).
-    SSP245_n24 pert (solid), SSP245_n24 ctrl (dashed).
+tell_interconnection_load_absolute_timeseries_<year>.png
+    Three-panel time-series (one per interconnection) — one pert/ctrl line
+    pair per perturbation↔control anomaly pair defined for the selected
+    year (e.g. for 2011: SSP245_p0/p12/p24/n12/n24 vs their matched CTRL).
     Y-axis = absolute peak load in GW.
 
-tell_interconnection_cooccurrence.png
+tell_interconnection_stress_heatmap_<year>.png
+    Heatmap of interconnection-level load anomaly (GW), one panel per
+    perturbation member, red border on cells exceeding the stress threshold.
+
+tell_interconnection_cooccurrence_<year>.png
     Stacked bar chart — daily count of simultaneously stressed
     interconnections, pert vs ctrl side by side.
 
-tell_interconnection_cooccurrence_summary.csv
+tell_interconnection_cooccurrence_summary_<year>.csv
     Per (date, data_source): list of stressed interconnections and co-
     occurrence count.
 
 Usage
 -----
     conda activate py39_tell
-    python interconnection_stress.py [--merged-csv PATH] [--ba-map CSV]
+    python interconnection_stress.py [--year YEAR] [--merged-csv PATH] [--ba-map CSV]
                                      [--output-dir DIR]
                                      [--stress-threshold-gw FLOAT]
                                      [--min-hw-frac FLOAT]
@@ -117,9 +119,16 @@ _SRC_DIR         = Path(__file__).parent
 _ENSEMBLE_OUTPUT = _SRC_DIR / "outputs"
 _LINKAGE_DIR     = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
 
-DEFAULT_MERGED_CSV = _LINKAGE_DIR / "tell_heatwave_merged.csv"
+# Matches Config.year's default in analyze_tell_heatwave.py
+DEFAULT_YEAR = 2011
+
 DEFAULT_BA_MAP_CSV = _SRC_DIR / "BA_to_Interconnection_Mapping.csv"
 DEFAULT_OUTPUT_DIR = _LINKAGE_DIR
+
+
+def _default_merged_csv(year: int) -> Path:
+    """Path to the tell_heatwave_merged_<year>.csv written by analyze_tell_heatwave.py."""
+    return _LINKAGE_DIR / f"tell_heatwave_merged_{year}.csv"
 
 # Interconnection display order and colours
 INTERCONNECTIONS: list[str] = ["EIC", "WECC", "ERCOT"]
@@ -231,6 +240,7 @@ def plot_interconnection_timeseries(
     ic_df: pd.DataFrame,
     output_dir: Path,
     as_pct: bool = False,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Stacked time-series — one narrow panel per interconnection, shared x-axis.
 
@@ -248,8 +258,8 @@ def plot_interconnection_timeseries(
     """
     y_col   = "anomaly_pct"    if as_pct else "sum_anomaly_GW"
     y_unit  = "% ctrl"         if as_pct else "GW"
-    fname   = ("tell_interconnection_load_anomaly_timeseries_pct.png"
-               if as_pct else "tell_interconnection_load_anomaly_timeseries.png")
+    fname   = (f"tell_interconnection_load_anomaly_timeseries_pct_{year}.png"
+               if as_pct else f"tell_interconnection_load_anomaly_timeseries_{year}.png")
 
     ics = [ic for ic in INTERCONNECTIONS if ic in ic_df["interconnection"].unique()]
     n_ics = len(ics)
@@ -327,6 +337,7 @@ def plot_interconnection_timeseries(
 def plot_interconnection_absolute_timeseries(
     ic_df: pd.DataFrame,
     output_dir: Path,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Stacked time-series of absolute peak load (GW) — one narrow panel per
     interconnection, shared x-axis.
@@ -421,15 +432,14 @@ def plot_interconnection_absolute_timeseries(
     )
     fig.suptitle(
         "Daily absolute peak load by interconnection\n"
-        "pert (solid) vs ctrl (dashed)  |  July 2011",
+        f"pert (solid) vs ctrl (dashed)  |  {year}",
         fontsize=FONTSIZE,
         y=0.98,
     )
-    fig.savefig(output_dir / "tell_interconnection_load_absolute_timeseries.png",
-                bbox_inches="tight")
+    out = output_dir / f"tell_interconnection_load_absolute_timeseries_{year}.png"
+    fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
-    log.info("Saved → %s",
-             output_dir / "tell_interconnection_load_absolute_timeseries.png")
+    log.info("Saved → %s", out)
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +478,7 @@ def plot_cooccurrence(
     cooc_df: pd.DataFrame,
     stress_threshold_gw: float,
     output_dir: Path,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Grouped bar chart: daily co-occurrence count, pert vs ctrl pairs.
 
@@ -514,13 +525,13 @@ def plot_cooccurrence(
     ax.set_ylabel("# interconnections stressed simultaneously", fontsize=FONTSIZE)
     ax.set_title(
         f"Daily co-occurrence of stressed interconnections\n"
-        f"Threshold: load anomaly > {stress_threshold_gw:.1f} GW  |  July 2011\n",
+        f"Threshold: load anomaly > {stress_threshold_gw:.1f} GW  |  {year}\n",
         fontsize=FONTSIZE,
     )
     ax.legend(fontsize=FONTSIZE, loc="upper right", frameon=True)
     fig.tight_layout()
 
-    out = output_dir / "tell_interconnection_cooccurrence.png"
+    out = output_dir / f"tell_interconnection_cooccurrence_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -530,6 +541,7 @@ def plot_cooccurrence_heatmap(
     ic_df: pd.DataFrame,
     stress_threshold_gw: float,
     output_dir: Path,
+    year: int = DEFAULT_YEAR,
 ) -> None:
     """Heatmap: date × interconnection, cell = anomaly_GW.
 
@@ -601,11 +613,11 @@ def plot_cooccurrence_heatmap(
 
     fig.suptitle(
         "Interconnection-level load anomaly (GW) per day\n"
-        f"Red border = exceeds {stress_threshold_gw:.1f} GW stress threshold  |  July 2011",
+        f"Red border = exceeds {stress_threshold_gw:.1f} GW stress threshold  |  {year}",
         fontsize=FONTSIZE,
     )
     fig.tight_layout()
-    out = output_dir / "tell_interconnection_stress_heatmap.png"
+    out = output_dir / f"tell_interconnection_stress_heatmap_{year}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", out)
@@ -623,11 +635,24 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
+        "--year",
+        type=int,
+        default=DEFAULT_YEAR,
+        help=(
+            "Heatwave event/year to analyse — must match the --year used when "
+            "running analyze_tell_heatwave.py, since it determines the default "
+            "--merged-csv filename."
+        ),
+    )
+    p.add_argument(
         "--merged-csv",
         type=Path,
-        default=DEFAULT_MERGED_CSV,
+        default=None,
         metavar="CSV",
-        help="Path to tell_heatwave_merged.csv (produced by analyze_tell_heatwave.py).",
+        help=(
+            "Path to tell_heatwave_merged_<year>.csv (produced by "
+            "analyze_tell_heatwave.py). Defaults to the file for --year."
+        ),
     )
     p.add_argument(
         "--ba-map",
@@ -669,17 +694,18 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 def main() -> None:
     args = parse_args()
+    merged_csv = args.merged_csv if args.merged_csv is not None else _default_merged_csv(args.year)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Load data ───────────────────────────────────────────────────────────
-    merged, _ = load_data(args.merged_csv, args.ba_map, args.min_hw_frac)
+    merged, _ = load_data(merged_csv, args.ba_map, args.min_hw_frac)
 
     # ── Analysis A: aggregate by interconnection ────────────────────────────
     log.info("Analysis A — aggregating load anomaly by interconnection …")
     ic_df = aggregate_by_interconnection(merged)
 
     # Save summary table
-    ic_csv = args.output_dir / "tell_interconnection_load_anomaly_GW.csv"
+    ic_csv = args.output_dir / f"tell_interconnection_load_anomaly_GW_{args.year}.csv"
     ic_df.to_csv(ic_csv, index=False)
     log.info("Interconnection load table saved → %s", ic_csv)
 
@@ -696,16 +722,16 @@ def main() -> None:
             )
 
     log.info("Plotting interconnection time-series (GW) …")
-    plot_interconnection_timeseries(ic_df, args.output_dir, as_pct=False)
+    plot_interconnection_timeseries(ic_df, args.output_dir, as_pct=False, year=args.year)
 
     log.info("Plotting interconnection time-series (%% of ctrl) …")
-    plot_interconnection_timeseries(ic_df, args.output_dir, as_pct=True)
+    plot_interconnection_timeseries(ic_df, args.output_dir, as_pct=True, year=args.year)
 
     log.info("Plotting interconnection absolute load time-series …")
-    plot_interconnection_absolute_timeseries(ic_df, args.output_dir)
+    plot_interconnection_absolute_timeseries(ic_df, args.output_dir, year=args.year)
 
     log.info("Plotting interconnection stress heatmap …")
-    plot_cooccurrence_heatmap(ic_df, args.stress_threshold_gw, args.output_dir)
+    plot_cooccurrence_heatmap(ic_df, args.stress_threshold_gw, args.output_dir, year=args.year)
 
     # ── Analysis B: co-occurrence index ─────────────────────────────────────
     log.info(
@@ -714,13 +740,13 @@ def main() -> None:
     )
     cooc_df = compute_cooccurrence(ic_df, args.stress_threshold_gw)
 
-    cooc_csv = args.output_dir / "tell_interconnection_cooccurrence_summary.csv"
+    cooc_csv = args.output_dir / f"tell_interconnection_cooccurrence_summary_{args.year}.csv"
     cooc_df.to_csv(cooc_csv, index=False)
     log.info("Co-occurrence summary saved → %s", cooc_csv)
     log.info("\n%s", cooc_df.to_string(index=False))
 
     log.info("Plotting co-occurrence bar chart …")
-    plot_cooccurrence(cooc_df, args.stress_threshold_gw, args.output_dir)
+    plot_cooccurrence(cooc_df, args.stress_threshold_gw, args.output_dir, year=args.year)
 
     log.info("Done. Outputs in %s", args.output_dir)
 
