@@ -27,7 +27,11 @@ Thirteen members are currently defined:
   2011_SSP245_n12       heatwave_201107_SSP245_n12/
   2011_SSP245_n24       heatwave_201107_SSP245_n24/
   2021_CTRL_p0          Heatwave_2021/CTRL/p0/
+  2021_CTRL_p24         Heatwave_2021/CTRL/p24/
+  2021_CTRL_n24         Heatwave_2021/CTRL/n24/
   2021_SSP245_p0        Heatwave_2021/SSP245/p0/
+  2021_SSP245_p24       Heatwave_2021/SSP245/p24/
+  2021_SSP245_n24       Heatwave_2021/SSP245/n24/
 
   EAMxx members share:
     • fname_abb  = output.eamxx.INSTANT.nsteps_x9.
@@ -96,6 +100,10 @@ log = logging.getLogger(__name__)
 EAMXX_BASE_PATH = "/pscratch/sd/j/jli628/EAMxx_regridding/"
 OUTPUT_BASE_DIR = Path(__file__).parent / "outputs"
 
+# Spatial map extent for 2021 members — focused on the Pacific Northwest
+# heatwave region, in place of the default CONUS-wide FIG_EXTENT.
+PNW_FIG_EXTENT = [235, 250, 41, 50]  # [lon_min, lon_max, lat_min, lat_max]
+
 # ---------------------------------------------------------------------------
 # Ensemble member definitions
 # ← Add / remove / modify members here; everything else is automatic.
@@ -117,7 +125,7 @@ class EnsembleMember:
     mon_start:     int  = 7
     mon_end:       int  = 7
     day_start:     int  = 17   # day 16 is spin-up → skip
-    day_end:       int  = 24
+    day_end:       int  = 29
 
     @property
     def is_era5_obs(self) -> bool:
@@ -167,7 +175,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 6,
         mon_end     = 7,
         day_start   = 25,
-        day_end     = 10,
+        day_end     = 5,
     ),
     EnsembleMember(
         data_source = "2011_CTRL_p0",
@@ -177,7 +185,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 28,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_CTRL_p12",
@@ -187,7 +195,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_CTRL_p24",
@@ -197,7 +205,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_CTRL_n12",
@@ -207,7 +215,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_CTRL_n24",
@@ -217,7 +225,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_SSP245_p0",
@@ -237,7 +245,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_SSP245_p24",
@@ -247,7 +255,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_SSP245_n12",
@@ -257,7 +265,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2011_SSP245_n24",
@@ -267,7 +275,7 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 7,
         mon_end     = 7,
         day_start   = 17,
-        day_end     = 24,
+        day_end     = 29,
     ),
     EnsembleMember(
         data_source = "2021_CTRL_p0",
@@ -277,7 +285,27 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 6,
         mon_end     = 7,
         day_start   = 25,
-        day_end     = 10,
+        day_end     = 5,
+    ),
+    EnsembleMember(
+        data_source = "2021_CTRL_p24",
+        subdir      = "Heatwave_2021/CTRL/p24/",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 5,
+    ),
+    EnsembleMember(
+        data_source = "2021_CTRL_n24",
+        subdir      = "Heatwave_2021/CTRL/n24/",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 5,
     ),
     EnsembleMember(
         data_source = "2021_SSP245_p0",
@@ -287,7 +315,27 @@ ENSEMBLE_MEMBERS: list[EnsembleMember] = [
         mon_start   = 6,
         mon_end     = 7,
         day_start   = 25,
-        day_end     = 10,
+        day_end     = 5,
+    ),
+    EnsembleMember(
+        data_source = "2021_SSP245_p24",
+        subdir      = "Heatwave_2021/SSP245/p24/",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 5,
+    ),
+    EnsembleMember(
+        data_source = "2021_SSP245_n24",
+        subdir      = "Heatwave_2021/SSP245/n24/",
+        yr_start    = 2021,
+        yr_end      = 2021,
+        mon_start   = 6,
+        mon_end     = 7,
+        day_start   = 25,
+        day_end     = 5,
     ),
 ]
 
@@ -335,6 +383,8 @@ def run_member(member: EnsembleMember, output_base: Path) -> bool:
     member_dir = output_base / member.data_source
     member_dir.mkdir(parents=True, exist_ok=True)
 
+    fig_extent = PNW_FIG_EXTENT if member.yr_start == 2021 else FIG_EXTENT
+
     try:
         analysis_cfg = member.to_analysis_cfg()
 
@@ -364,7 +414,7 @@ def run_member(member: EnsembleMember, output_base: Path) -> bool:
         # ---- step 6: heatwave-day frequency map ----------------------------
         plot_frequency(
             heatwave_mask, member.varnames,
-            analysis_cfg, FIG_EXTENT, member.data_source,
+            analysis_cfg, fig_extent, member.data_source,
             output_dir=member_dir,
         )
 
@@ -372,28 +422,28 @@ def run_member(member: EnsembleMember, output_base: Path) -> bool:
         heatwave_anomaly = anomaly.where(heatwave_mask)
         plot_max_anomaly(
             heatwave_anomaly, member.varnames,
-            analysis_cfg, FIG_EXTENT, member.data_source,
+            analysis_cfg, fig_extent, member.data_source,
             output_dir=member_dir,
         )
         
         # ---- step 8b: daily anomaly panels ----------------------------------
         plot_daily_anomaly_panels(
             anomaly, member.varnames,
-            analysis_cfg, FIG_EXTENT, member.data_source,
+            analysis_cfg, fig_extent, member.data_source,
             output_dir=member_dir,
         )
 
         # ---- step 9: largest contiguous region per day ---------------------
         plot_largest_contiguous_region(
             heatwave_mask, anomaly, member.varnames,
-            analysis_cfg, FIG_EXTENT, member.data_source,
+            analysis_cfg, fig_extent, member.data_source,
             output_dir=member_dir,
         )
 
         # ---- step 10: longest duration map ---------------------------------
         plot_longest_duration(
             heatwave_mask, member.varnames,
-            analysis_cfg, FIG_EXTENT, member.data_source,
+            analysis_cfg, fig_extent, member.data_source,
             output_dir=member_dir,
         )
 

@@ -14,7 +14,6 @@ src/
 ├── compare_heatwaves.py           # Compare heatwave metrics across members
 ├── build_grid_to_ba.py            # Build grid-cell → BA mapping parquet (one-time)
 ├── analyze_tell_heatwave.py       # Link TELL load to heatwave events (main script)
-├── decompose_load_anomaly.py      # OLS decomposition: load anomaly vs HW drivers
 ├── interconnection_stress.py      # System-wide stress across U.S. interconnections (Analyses A + B)
 ├── mean_shift_decompose.py        # ⚠️ NOT APPLICABLE — see script docstring (requires non-heatwave days)
 ├── util_heatwaves.py              # Heatwave utility functions
@@ -84,8 +83,12 @@ pip install -r requirements.txt
 | `2011_SSP245_p24` | `heatwave_201107_SSP245_p24/` | SSP2-4.5 +1.2 K perturbation |
 | `2011_SSP245_n12` | `heatwave_201107_SSP245_n12/` | SSP2-4.5 +1.2 K perturbation |
 | `2011_SSP245_n24` | `heatwave_201107_SSP245_n24/` | SSP2-4.5 +1.2 K perturbation |
-| `2021_CTRL_p0` | `heatwave_2021_CTRL_p0/` | 2021 control |
-| `2021_SSP245_p0` | `heatwave_2021_SSP245_p0/` | 2021 SSP2-4.5 perturbation |
+| `2021_CTRL_p0`  | `heatwave_2021_CTRL_p0/` | 2021 control |
+| `2021_CTRL_p24` | `heatwave_2021_CTRL_p24/` | 2021 control |
+| `2021_CTRL_n24` | `heatwave_2021_CTRL_n24/` | 2021 control |
+| `2021_SSP245_p0`  | `heatwave_2021_SSP245_p0/`  | 2021 SSP2-4.5 perturbation |
+| `2021_SSP245_p24` | `heatwave_2021_SSP245_p24/` | 2021 SSP2-4.5 perturbation |
+| `2021_SSP245_n24` | `heatwave_2021_SSP245_n24/` | 2021 SSP2-4.5 perturbation |
 
 ---
 
@@ -170,48 +173,13 @@ cache is also invalidated and rebuilt automatically if the member set or the
 underlying data's date range changes (e.g. new simulation days are added). To
 force a recompute manually, delete that CSV file.
 
-### Step 5 – OLS decomposition of the load anomaly (Analysis 1)
+### Step 5 - Plot heatwave-affected BAs per day for various thresholds
 
-Answers: *How much of the warming-driven peak-load increase is explained by
-heatwave spatial extent, mean intensity, or peak intensity?*
+python plot_affected_ba.py
 
-Reads the `tell_heatwave_merged_<year>.csv` written by Step 4 and fits a
-standardised OLS model per perturbation member:
+Plot the number of heatwave-affected balancing authorities (BAs) per day for
+the Control and PGW (SSP245) ensembles, one panel per BA-fraction threshold.
 
-```
-peak_load_anomaly_GW  ~  β₀ + β₁·hw_area_km2 + β₂·hw_mean_K + β₃·hw_max_K
-```
-
-All predictors and the response are standardised before fitting, so the
-resulting β* coefficients are directly comparable across predictors.
-
-```bash
-# Default run (year=2011, reads from outputs/tell_heatwave_linkage/)
-python decompose_load_anomaly.py
-
-# Select the year (must match the --year used in Step 4)
-python decompose_load_anomaly.py --year 2011
-
-# Override input / output paths
-python decompose_load_anomaly.py \
-    --year 2011 \
-    --merged-csv /path/to/tell_heatwave_merged_2011.csv \
-    --output-dir /path/to/output/
-
-# See all options
-python decompose_load_anomaly.py --help
-```
-
-Available CLI flags:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--year` | `2011` | Heatwave event/year to analyse — must match the `--year` used in Step 4; determines the default `--merged-csv` filename |
-| `--merged-csv` | `outputs/tell_heatwave_linkage/tell_heatwave_merged_<year>.csv` | Input merged CSV from Step 4 |
-| `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory for figures and CSV |
-| `--min-hw-frac` | `0.0` | Minimum BA heatwave-area fraction (0–1) for inclusion in regression. Rows with `hw_area_frac ≤` this value are dropped. E.g. `0.1` keeps only BAs where ≥10 % of territory is under the heatwave. |
-
----
 
 ### Step 6 – Interconnection-level stress analysis (Analyses A + B)
 
@@ -219,8 +187,10 @@ Answers: *Does future warming increase the simultaneous stress on multiple
 U.S. electricity interconnections, and by how much in load terms?*
 
 Uses `BA_to_Interconnection_Mapping.csv` (repo root) to map each BA to one of
-the three U.S. interconnections (EIC, WECC, ERCOT), then aggregates
-`tell_heatwave_merged_<year>.csv` to the interconnection level.
+the three U.S. interconnections (EIC, WIC, ERCOT), then sums the daily
+peak load of *all* BAs in each interconnection from
+`tell_load_daily_all_<year>.csv` (written by every Step 4 run, not filtered
+to heatwave-affected BAs), so every PGW − Control pair sums the same BA set.
 
 **Analysis A — Load stress time-series**
 Sums daily peak-load anomaly over all BAs per interconnection × member.
@@ -247,11 +217,12 @@ python interconnection_stress.py --year 2011
 
 # Use a more stringent stress threshold (e.g. 5 GW)
 python interconnection_stress.py --stress-threshold-gw 5.0
+python interconnection_stress.py --stress-threshold-gw 5.0 --year 2021
 
 # Override paths
 python interconnection_stress.py \
     --year 2011 \
-    --merged-csv /path/to/tell_heatwave_merged_2011.csv \
+    --load-csv   /path/to/tell_load_daily_all_2011.csv \
     --ba-map     /path/to/BA_to_Interconnection_Mapping.csv \
     --output-dir /path/to/output/
 
@@ -263,12 +234,11 @@ Available CLI flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--year` | `2011` | Heatwave event/year to analyse — must match the `--year` used in Step 4; determines the default `--merged-csv` filename |
-| `--merged-csv` | `outputs/tell_heatwave_linkage/tell_heatwave_merged_<year>.csv` | Input merged CSV from Step 4 |
+| `--year` | `2011` | Heatwave event/year to analyse — must match the `--year` used in Step 4; determines the default `--load-csv` filename |
+| `--load-csv` | `outputs/tell_heatwave_linkage/tell_load_daily_all_<year>.csv` | Input daily all-BA peak load from Step 4 |
 | `--ba-map` | `BA_to_Interconnection_Mapping.csv` | BA → Interconnection lookup CSV |
 | `--output-dir` | `outputs/tell_heatwave_linkage/` | Output directory for figures and CSVs |
 | `--stress-threshold-gw` | `0.0` | Min load anomaly (GW) for an interconnection to count as "stressed" |
-| `--min-hw-frac` | `0.0` | Min BA heatwave-area fraction; rows at or below this are excluded |
 
 ---
 
@@ -329,22 +299,20 @@ Available CLI flags:
 ## Outputs
 
 All outputs are written to `outputs/tell_heatwave_linkage/`. Every filename
-below is suffixed with `_<year>` (e.g. `tell_heatwave_merged_2011.csv`), so
+below is suffixed with `_<year>` (e.g. `tell_heatwave_threshold_0.8_2011.csv`), so
 runs for different `--year` values coexist without overwriting each other:
 
 | File | Description |
 |------|-------------|
 | `tell_heatwave_affected_bas_<year>.csv` | Cache: BA heatwave area fractions per member per day |
-| `tell_heatwave_merged_<year>.csv` | Merged daily peak-load anomaly + heatwave characteristics |
-| `tell_heatwave_correlations_<year>.csv` | Pearson r table (load anomaly vs heatwave metrics) |
+| `tell_heatwave_threshold_<threshold>_<year>.csv` | Merged daily peak-load anomaly + heatwave characteristics, for BA-days with heatwave-area fraction > `<threshold>` |
 | `tell_affected_bas_per_day_<year>_<threshold>.png` | Bar chart: # of heatwave-affected BAs per day, all members |
 | `tell_load_anomaly_timeseries_per_ba_<year>.png` | Daily peak-load anomaly (GW) for top 5 BAs — one subplot per member |
 | `tell_load_anomaly_pct_timeseries_per_ba_<year>.png` | Same, as % of control load |
-| `tell_load_anomaly_timeseries_per_ba_comparison_<year>.png` | 2×2 grid: top 4 BAs by HW fraction — lines per member (GW) |
+| `tell_load_anomaly_timeseries_per_ba_comparison_<year>.png` | Fixed BA set: PGW − Control peak-load anomaly (GW), mean over pairs with min–max band; BA-days with any heatwave overlap |
 | `tell_load_anomaly_pct_timeseries_per_ba_comparison_<year>.png` | Same, as % of control load |
-| `tell_load_anomaly_timeseries_per_ba_comparison_top_anomaly_<year>.png` | 2×2 grid: top 4 BAs by largest load anomaly — lines per member (GW) |
+| `tell_load_anomaly_timeseries_per_ba_comparison_top_anomaly_<year>.png` | Same, for the top 4 BAs by largest mean load anomaly |
 | `tell_load_anomaly_pct_timeseries_per_ba_comparison_top_anomaly_<year>.png` | Same, as % of control load |
-| `tell_load_vs_heatwave_scatter_<year>.png` | Scatter: load anomaly vs spatial extent / intensity |
 | `tell_load_decomp_regression_table_<year>.csv` | OLS results: β*, SE, 95% CI, p-value, R² per member × predictor |
 | `tell_load_decomp_std_coeffs_<year>.png` | Standardised OLS coefficients β* with 95% CI — grouped bar chart |
 | `tell_load_decomp_partial_regression_<year>.png` | Partial-regression plots — load anomaly vs each HW characteristic |

@@ -2,7 +2,7 @@
 interconnection_stress.py
 -------------------------
 Assess system-wide heat stress across the three U.S. electricity
-interconnections (EIC, WECC, ERCOT) under future warming.
+interconnections (EIC, WIC, ERCOT) under future warming.
 
 Scientific question
 -------------------
@@ -31,16 +31,19 @@ Analysis B — Daily co-occurrence index
 
 Inputs
 ------
-``outputs/tell_heatwave_linkage/tell_heatwave_merged_<year>.csv``
-    Per-BA daily peak-load anomaly on heatwave days, all members, for the
-    selected --year (produced by ``analyze_tell_heatwave.py --year <year>``).
-    Columns: date, BA, data_source, peak_load, peak_load_anomaly,
-             peak_load_ctrl, hw_area_frac, hw_area_anomaly_km2,
-             hw_mean_K, hw_max_K
-    Units: MW (peak_load, peak_load_anomaly, peak_load_ctrl)
+``outputs/tell_heatwave_linkage/tell_load_daily_all_<year>.csv``
+    Per-BA daily peak load for every BA and day (not filtered to
+    heatwave-affected BAs), perturbation members, for the selected --year
+    (written by every ``analyze_tell_heatwave.py --year <year>`` run).
+    Columns: date, BA, data_source, peak_load, peak_load_anomaly, peak_load_ctrl
+    Units: MW
+
+    Interconnection totals sum *all* BAs in the interconnection, so every
+    PGW − Control pair sums the same BA set and the totals are comparable
+    across pairs and days.
 
 ``BA_to_Interconnection_Mapping.csv``  (tracked in the repo root)
-    Static lookup: BA_Code → Interconnection (EIC | WECC | ERCOT).
+    Static lookup: BA_Code → Interconnection (EIC | WIC | ERCOT).
 
 Outputs (all written to OUTPUT_DIR, named with --year)
 ---------------------------------------------------------
@@ -48,26 +51,28 @@ tell_interconnection_load_anomaly_GW_<year>.csv
     Per (date, interconnection, data_source): sum_anomaly_GW, sum_ctrl_GW,
     anomaly_pct.
 
+Each perturbation member's anomaly is one PGW − Control pair; the figures
+summarise the pairs as an ensemble (mean with min–max range) rather than one
+line or panel per member.
+
 tell_interconnection_load_anomaly_timeseries_<year>.png
-    Three-panel time-series (one per interconnection) — perturbation and
-    control lines, GW anomaly.
+    Three-panel time-series (one per interconnection) — PGW − Control
+    anomaly (GW): mean over pairs with a min–max band.
 
 tell_interconnection_load_anomaly_timeseries_pct_<year>.png
     Same as above, expressed as % of control load.
 
 tell_interconnection_load_absolute_timeseries_<year>.png
-    Three-panel time-series (one per interconnection) — one pert/ctrl line
-    pair per perturbation↔control anomaly pair defined for the selected
-    year (e.g. for 2011: SSP245_p0/p12/p24/n12/n24 vs their matched CTRL).
-    Y-axis = absolute peak load in GW.
+    Three-panel time-series (one per interconnection) — absolute peak load
+    (GW) of the Control and PGW ensembles: mean with a min–max band each.
 
 tell_interconnection_stress_heatmap_<year>.png
-    Heatmap of interconnection-level load anomaly (GW), one panel per
-    perturbation member, red border on cells exceeding the stress threshold.
+    Heatmap of the ensemble-mean interconnection-level load anomaly (GW);
+    red border on cells where every pair exceeds the stress threshold.
 
 tell_interconnection_cooccurrence_<year>.png
-    Stacked bar chart — daily count of simultaneously stressed
-    interconnections, pert vs ctrl side by side.
+    Bar chart — daily number of simultaneously stressed interconnections:
+    mean over pairs (bar) with min–max whiskers.
 
 tell_interconnection_cooccurrence_summary_<year>.csv
     Per (date, data_source): list of stressed interconnections and co-
@@ -76,10 +81,9 @@ tell_interconnection_cooccurrence_summary_<year>.csv
 Usage
 -----
     conda activate py39_tell
-    python interconnection_stress.py [--year YEAR] [--merged-csv PATH] [--ba-map CSV]
+    python interconnection_stress.py [--year YEAR] [--load-csv PATH] [--ba-map CSV]
                                      [--output-dir DIR]
                                      [--stress-threshold-gw FLOAT]
-                                     [--min-hw-frac FLOAT]
 
 Authors
 -------
@@ -90,17 +94,18 @@ from __future__ import annotations
 
 import argparse
 import logging
+import warnings
 from pathlib import Path
 
 import matplotlib as mpl
 mpl.use("Agg")
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
-from util_constants import ANOMALY_PAIRS, FONTSIZE, MEMBER_COLORS, PERTURBATION_MEMBERS, sorted_member_order, display_name
+from util_constants import EXPERIMENT_STYLES, FONTSIZE, PERTURBATION_MEMBERS
+from util_vector_plots import plot_mean_range
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -126,60 +131,52 @@ DEFAULT_BA_MAP_CSV = _SRC_DIR / "BA_to_Interconnection_Mapping.csv"
 DEFAULT_OUTPUT_DIR = _LINKAGE_DIR
 
 
-def _default_merged_csv(year: int) -> Path:
-    """Path to the tell_heatwave_merged_<year>.csv written by analyze_tell_heatwave.py."""
-    return _LINKAGE_DIR / f"tell_heatwave_merged_{year}.csv"
+def _default_load_csv(year: int) -> Path:
+    """Path to the tell_load_daily_all_<year>.csv written by analyze_tell_heatwave.py."""
+    return _LINKAGE_DIR / f"tell_load_daily_all_{year}.csv"
 
 # Interconnection display order and colours
-INTERCONNECTIONS: list[str] = ["EIC", "WECC", "ERCOT"]
+INTERCONNECTIONS: list[str] = ["EIC", "WIC", "ERCOT"]
 IC_COLORS: dict[str, str] = {
     "EIC":   "#1f77b4",   # blue
-    "WECC":  "#ff7f0e",   # orange
+    "WIC":  "#ff7f0e",   # orange
     "ERCOT": "#9467bd",   # purple
 }
 
-# Line styles for pert vs ctrl
-PERT_LS  = "-"
-CTRL_LS  = "--"
+# Style of the PGW − Control difference (mean line + range band), as in
+# analyze_tell_heatwave.py / plot_affected_ba.py
+DIFF_STYLE = dict(label="PGW − Control", color="black", band_color="gray")
 
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 def load_data(
-    merged_csv: Path,
+    load_csv: Path,
     ba_map_csv: Path,
-    min_hw_frac: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load and validate the merged load CSV and BA→interconnection map.
+    """Load and validate the daily all-BA load CSV and BA→interconnection map.
 
     Returns
     -------
-    merged : filtered merged DataFrame with an added ``interconnection`` column
+    merged : daily load DataFrame with an added ``interconnection`` column
     ba_map : BA_Code → Interconnection lookup
     """
-    for path, label in [(merged_csv, "Merged CSV"), (ba_map_csv, "BA map CSV")]:
+    for path, label in [(load_csv, "Daily load CSV"), (ba_map_csv, "BA map CSV")]:
         if not path.exists():
             raise FileNotFoundError(f"{label} not found: {path}")
 
-    merged = pd.read_csv(merged_csv, parse_dates=["date"])
+    merged = pd.read_csv(load_csv, parse_dates=["date"])
     ba_map = pd.read_csv(ba_map_csv, dtype=str).rename(
         columns={"BA_Code": "BA", "Interconnection": "interconnection"}
     )
 
     # Validate required columns
-    required = {"date", "BA", "data_source", "peak_load_anomaly",
-                "peak_load_ctrl", "hw_area_frac"}
+    required = {"date", "BA", "data_source", "peak_load",
+                "peak_load_anomaly", "peak_load_ctrl"}
     missing = required - set(merged.columns)
     if missing:
-        raise ValueError(f"Merged CSV missing columns: {missing}")
-
-    # Apply hw_area_frac filter
-    n_before = len(merged)
-    merged = merged[merged["hw_area_frac"] > min_hw_frac].copy()
-    log.info(
-        "Loaded merged CSV: %d rows kept (of %d) after hw_area_frac > %.2f",
-        len(merged), n_before, min_hw_frac,
-    )
+        raise ValueError(f"Daily load CSV missing columns: {missing}")
+    log.info("Loaded daily load CSV: %d rows, %d BAs", len(merged), merged["BA"].nunique())
 
     # Attach interconnection
     merged = merged.merge(ba_map[["BA", "interconnection"]], on="BA", how="left")
@@ -236,6 +233,58 @@ def aggregate_by_interconnection(merged: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
+def _pair_members(ic_df: pd.DataFrame) -> list[str]:
+    """Perturbation members (one per PGW − Control pair) present in *ic_df*."""
+    present = set(ic_df["data_source"].unique())
+    return [m for m in PERTURBATION_MEMBERS if m in present]
+
+
+def _pair_table(ic_df: pd.DataFrame, ic: str, col: str, dates) -> pd.DataFrame:
+    """date × pair table of *col* for one interconnection; days missing for a
+    pair are NaN (gaps)."""
+    return (
+        ic_df[ic_df["interconnection"] == ic]
+        .pivot_table(index="date", columns="data_source", values=col, aggfunc="first")
+        .reindex(dates)
+    )
+
+
+def _stacked_ic_axes(n_ics: int, sharey: bool = False):
+    """One narrow panel per interconnection, shared x-axis, no vertical gap."""
+    fig, axes = plt.subplots(
+        n_ics, 1,
+        figsize=(10, 2.5 * n_ics + 1.2),
+        sharex=True,
+        sharey=sharey,
+        squeeze=False,
+    )
+    fig.subplots_adjust(hspace=0)
+    return fig, axes
+
+
+def _style_ic_axis(ax, ylabel: str, is_bottom: bool) -> None:
+    """IC name + units on the y-axis, 3 y-ticks, x labels on the bottom only."""
+    ax.set_ylabel(ylabel, fontsize=FONTSIZE, labelpad=4)
+    ax.tick_params(axis="y", labelsize=FONTSIZE)
+    ax.tick_params(axis="x", labelsize=FONTSIZE, labelbottom=is_bottom)
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=3, prune="both"))
+    ax.spines["bottom"].set_linewidth(0.4)
+
+
+def _bottom_legend(fig, axes, y_anchor: float) -> None:
+    """Single legend below the panels, from the first panel with data."""
+    handles, labels = next(
+        (ax.get_legend_handles_labels() for ax in axes[:, 0]
+         if ax.get_legend_handles_labels()[0]),
+        ([], []),
+    )
+    if handles:
+        fig.legend(handles, labels, loc="lower center", ncol=len(handles),
+                   fontsize=FONTSIZE, frameon=True, bbox_to_anchor=(0.5, y_anchor))
+    else:
+        log.warning("No data to plot; skipping legend.")
+
+
 def plot_interconnection_timeseries(
     ic_df: pd.DataFrame,
     output_dir: Path,
@@ -244,7 +293,10 @@ def plot_interconnection_timeseries(
 ) -> None:
     """Stacked time-series — one narrow panel per interconnection, shared x-axis.
 
-    Layout mirrors the reference image:
+    Each panel shows the PGW − Control peak-load anomaly as the mean over
+    pairs (line with markers) and the pair min–max (shaded band).
+
+    Layout:
       • No subplot titles — the interconnection name is written on the y-axis.
       • All panels share the x-axis; tick labels only on the bottom panel.
       • Zero-line drawn on every panel.
@@ -253,82 +305,36 @@ def plot_interconnection_timeseries(
 
     Outputs
     -------
-    tell_interconnection_load_anomaly_timeseries.png      (as_pct=False)
-    tell_interconnection_load_anomaly_timeseries_pct.png  (as_pct=True)
+    tell_interconnection_load_anomaly_timeseries_<year>.png      (as_pct=False)
+    tell_interconnection_load_anomaly_timeseries_pct_<year>.png  (as_pct=True)
     """
     y_col   = "anomaly_pct"    if as_pct else "sum_anomaly_GW"
     y_unit  = "% ctrl"         if as_pct else "GW"
     fname   = (f"tell_interconnection_load_anomaly_timeseries_pct_{year}.png"
                if as_pct else f"tell_interconnection_load_anomaly_timeseries_{year}.png")
 
-    ics = [ic for ic in INTERCONNECTIONS if ic in ic_df["interconnection"].unique()]
-    n_ics = len(ics)
-
-    fig, axes = plt.subplots(
-        n_ics, 1,
-        figsize=(10, 2.5 * n_ics + 1.2),
-        sharex=True,
-        sharey=as_pct,   # shared y-axis only for the % plot
-        squeeze=False,
-    )
-    fig.subplots_adjust(hspace=0)
-
-    legend_handles: list = []
-    legend_labels:  list = []
+    ics   = [ic for ic in INTERCONNECTIONS if ic in ic_df["interconnection"].unique()]
+    dates = sorted(ic_df["date"].unique())
+    pairs = _pair_members(ic_df)
+    fig, axes = _stacked_ic_axes(len(ics), sharey=as_pct)   # shared y only for %
 
     for row, ic in enumerate(ics):
-        ax  = axes[row, 0]
-        sub = ic_df[ic_df["interconnection"] == ic].sort_values("date")
-
-        for pert, ctrl in ANOMALY_PAIRS.items():
-            color = MEMBER_COLORS.get(pert, "grey")
-            for member, ls, lw, alpha in [
-                (pert, PERT_LS,  2.0, 1.0),
-                (ctrl, CTRL_LS,  1.4, 0.7),
-            ]:
-                msub = sub[sub["data_source"] == member]
-                if msub.empty:
-                    continue
-                line, = ax.plot(
-                    msub["date"], msub[y_col],
-                    color=color, linestyle=ls, linewidth=lw, alpha=alpha,
-                    marker="o", markersize=3,
-                    label=display_name(member),
-                )
-                # Collect legend entries only from the first panel
-                if row == 0:
-                    legend_handles.append(line)
-                    legend_labels.append(display_name(member))
-
+        ax   = axes[row, 0]
+        wide = _pair_table(ic_df, ic, y_col, dates)
+        cols = [m for m in pairs if m in wide.columns]
+        if cols:
+            plot_mean_range(
+                ax, wide.index, wide, cols, DIFF_STYLE["color"], DIFF_STYLE["label"],
+                n_label=f"n={len(cols)} pairs", band_color=DIFF_STYLE["band_color"],
+                alpha=0.3, marker="o", markersize=3,
+            )
         ax.axhline(0, color="black", linewidth=0.6, linestyle=":")
-        # IC name + units on the y-axis instead of a subplot title
-        ax.set_ylabel(f"{ic} peak-load\nanomaly ({y_unit})", fontsize=FONTSIZE, labelpad=4)
-        ax.tick_params(axis="y", labelsize=FONTSIZE)
-        ax.tick_params(axis="x", labelsize=FONTSIZE,
-                       labelbottom=(row == n_ics - 1))
+        _style_ic_axis(ax, f"{ic} peak-load\nanomaly ({y_unit})", row == len(ics) - 1)
         if as_pct:
             ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f%%"))
-        # Keep only 3 y-ticks per panel to avoid crowding
-        ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=3, prune="both"))
-        # Draw a thin spine between panels
-        ax.spines["bottom"].set_linewidth(0.4)
 
-    # x-axis date formatting on the bottom panel only
     axes[-1, 0].xaxis.set_tick_params(rotation=30)
-
-    fig.legend(
-        legend_handles, legend_labels,
-        loc="lower center",
-        ncol=min(3, len(legend_handles)),
-        fontsize=FONTSIZE,
-        frameon=True,
-        bbox_to_anchor=(0.5, -0.12),
-    )
-    #fig.suptitle(
-    #    "Daily peak-load anomaly by interconnection",
-    #    fontsize=FONTSIZE,
-    #    y=0.98,
-    #)
+    _bottom_legend(fig, axes, y_anchor=-0.12)
     fig.savefig(output_dir / fname, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", output_dir / fname)
@@ -342,28 +348,12 @@ def plot_interconnection_absolute_timeseries(
     """Stacked time-series of absolute peak load (GW) — one narrow panel per
     interconnection, shared x-axis.
 
-    Each panel has four lines:
-      - SSP245     perturbation (solid,  green)
-      - SSP245     control      (dashed, green)
-      - SSP245_p12 perturbation (solid,  red)
-      - SSP245_p12 control      (dashed, red)
-      - SSP245_p24 perturbation (solid,  blue)
-      - SSP245_p24 control      (dashed, blue)
-      - SSP245_n12 perturbation (solid,  gray)
-      - SSP245_n12 control      (dashed, gray)
-      - SSP245_n24 perturbation (solid,  brown)
-      - SSP245_n24 control      (dashed, brown)
+    Each perturbation-member row carries its own summed load (``sum_load_GW``,
+    PGW) and its matched control's (``sum_ctrl_GW``).  For the Control and
+    PGW ensembles each panel shows the mean over pairs (line with markers)
+    and the min–max (shaded band).
 
-    Layout mirrors the reference image:
-      • No subplot titles — interconnection name written on the y-axis.
-      • Shared x-axis; tick labels only on the bottom panel.
-      • Tight vertical spacing (hspace = 0).
-      • Single legend at the bottom of the figure.
-
-    ``sum_load_GW``  is used for perturbation members (absolute pert load).
-    ``sum_ctrl_GW``  is used for the matched control (read from pert rows).
-
-    Output: tell_interconnection_load_absolute_timeseries.png
+    Output: tell_interconnection_load_absolute_timeseries_<year>.png
     """
     if "sum_load_GW" not in ic_df.columns:
         log.warning(
@@ -373,66 +363,25 @@ def plot_interconnection_absolute_timeseries(
         return
 
     ics   = [ic for ic in INTERCONNECTIONS if ic in ic_df["interconnection"].unique()]
-    n_ics = len(ics)
-
-    fig, axes = plt.subplots(
-        n_ics, 1,
-        figsize=(10, 2.5 * n_ics + 1.2),
-        sharex=True,
-        squeeze=False,
-    )
-    fig.subplots_adjust(hspace=0)
-
-    legend_handles: list = []
-    legend_labels:  list = []
+    dates = sorted(ic_df["date"].unique())
+    pairs = _pair_members(ic_df)
+    fig, axes = _stacked_ic_axes(len(ics))
 
     for row, ic in enumerate(ics):
-        ax  = axes[row, 0]
-        sub = ic_df[ic_df["interconnection"] == ic].sort_values("date")
-
-        for pert, ctrl in ANOMALY_PAIRS.items():
-            color  = MEMBER_COLORS.get(pert, "grey")
-            m_pert = sub[sub["data_source"] == pert]
-            if m_pert.empty:
-                continue
-
-            line_ctrl, = ax.plot(
-                m_pert["date"], m_pert["sum_ctrl_GW"],
-                color=color, linestyle=CTRL_LS, linewidth=1.4, alpha=0.7,
-                marker="o", markersize=3,
-                label=display_name(ctrl),
-            )
-            line_pert, = ax.plot(
-                m_pert["date"], m_pert["sum_load_GW"],
-                color=color, linestyle=PERT_LS, linewidth=2.0, alpha=1.0,
-                marker="o", markersize=3,
-                label=display_name(pert),
-            )
-            if row == 0:
-                legend_handles += [line_ctrl, line_pert]
-                legend_labels  += [display_name(ctrl), display_name(pert)]
-
-        # IC name + units as y-axis label; no subplot title
-        ax.set_ylabel(f"{ic} (GW)", fontsize=FONTSIZE, labelpad=4)
-        ax.tick_params(axis="y", labelsize=FONTSIZE)
-        ax.tick_params(axis="x", labelsize=FONTSIZE,
-                       labelbottom=(row == n_ics - 1))
-        ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=3, prune="both"))
-        ax.spines["bottom"].set_linewidth(0.4)
+        ax = axes[row, 0]
+        for exp, col in (("CTRL", "sum_ctrl_GW"), ("SSP245", "sum_load_GW")):
+            wide = _pair_table(ic_df, ic, col, dates)
+            cols = [m for m in pairs if m in wide.columns]
+            if cols:
+                style = EXPERIMENT_STYLES[exp]
+                plot_mean_range(ax, wide.index, wide, cols, style["color"], style["label"],
+                                marker="o", markersize=3)
+        _style_ic_axis(ax, f"{ic} (GW)", row == len(ics) - 1)
 
     axes[-1, 0].xaxis.set_tick_params(rotation=30)
-
-    fig.legend(
-        legend_handles, legend_labels,
-        loc="lower center",
-        ncol=min(3, len(legend_handles)),
-        fontsize=FONTSIZE,
-        frameon=True,
-        bbox_to_anchor=(0.5, -0.16),
-    )
+    _bottom_legend(fig, axes, y_anchor=-0.16)
     fig.suptitle(
-        "Daily absolute peak load by interconnection\n"
-        f"pert (solid) vs ctrl (dashed)  |  {year}",
+        f"Daily absolute peak load by interconnection  |  {year}",
         fontsize=FONTSIZE,
         y=0.98,
     )
@@ -480,48 +429,36 @@ def plot_cooccurrence(
     output_dir: Path,
     year: int = DEFAULT_YEAR,
 ) -> None:
-    """Grouped bar chart: daily co-occurrence count, pert vs ctrl pairs.
+    """Bar chart of the daily number of simultaneously stressed
+    interconnections: mean over PGW − Control pairs (bar) with min–max
+    whiskers.  A pair with no row for a day counts as 0 stressed.
 
-    One group per day; within each group one bar per member, coloured by
-    whether it is a perturbation or control run.
-
-    Output: tell_interconnection_cooccurrence.png
+    Output: tell_interconnection_cooccurrence_<year>.png
     """
-    all_members = sorted_member_order(set(cooc_df["data_source"].unique()))
-    dates = sorted(cooc_df["date"].unique())
-    n_dates   = len(dates)
-    n_members = len(all_members)
-    bar_width = 0.8 / n_members
-    x         = np.arange(n_dates)
-    date_labels = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in dates]
+    counts = (
+        cooc_df.pivot_table(index="date", columns="data_source",
+                            values="n_stressed", aggfunc="first")
+        .fillna(0)
+    )
+    pairs = [m for m in PERTURBATION_MEMBERS if m in counts.columns]
+    counts = counts[pairs]
+    mean, lo, hi = counts.mean(axis=1), counts.min(axis=1), counts.max(axis=1)
 
-    _ctrl_members = set(ANOMALY_PAIRS.values())
+    x = np.arange(len(counts))
+    date_labels = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in counts.index]
 
-    fig, ax = plt.subplots(figsize=(max(10, n_dates * 1.2), 7))
-
-    for i, member in enumerate(all_members):
-        m_sub  = cooc_df[cooc_df["data_source"] == member].set_index("date")
-        counts = [int(m_sub.loc[d, "n_stressed"]) if d in m_sub.index else 0
-                  for d in dates]
-        x_pos  = x + (i - (n_members - 1) / 2.0) * bar_width
-        is_ctrl   = member in _ctrl_members
-        base_color = MEMBER_COLORS.get(member, "grey")
-        rgba = (*mcolors.to_rgb(base_color), 0.35 if is_ctrl else 0.85)
-        ax.bar(
-            x_pos, counts,
-            width=bar_width * 0.9,
-            label=display_name(member),
-            facecolor=rgba,
-            edgecolor=base_color if is_ctrl else "white",
-            linewidth=0.8,
-            hatch="//" if is_ctrl else "",
-        )
+    fig, ax = plt.subplots(figsize=(max(10, len(x) * 0.8), 6))
+    ax.bar(x, mean, width=0.7, color=DIFF_STYLE["band_color"], edgecolor="black",
+           linewidth=0.8, label=f"Mean (n={len(pairs)} pairs)")
+    ax.errorbar(x, mean, yerr=[mean - lo, hi - mean], fmt="none",
+                ecolor="black", elinewidth=1.5, capsize=4, label="Range (min–max)")
 
     ax.set_xticks(x)
     ax.set_xticklabels(date_labels, rotation=30, ha="right", fontsize=FONTSIZE)
     ax.set_yticks(range(len(INTERCONNECTIONS) + 1))
     ax.set_yticklabels([str(n) for n in range(len(INTERCONNECTIONS) + 1)],
                        fontsize=FONTSIZE)
+    ax.set_ylim(0, len(INTERCONNECTIONS) + 1.0)   # headroom for the legend
     ax.set_ylabel("# interconnections stressed simultaneously", fontsize=FONTSIZE)
     ax.set_title(
         f"Daily co-occurrence of stressed interconnections\n"
@@ -543,77 +480,50 @@ def plot_cooccurrence_heatmap(
     output_dir: Path,
     year: int = DEFAULT_YEAR,
 ) -> None:
-    """Heatmap: date × interconnection, cell = anomaly_GW.
+    """Heatmap: interconnection × date, cell = ensemble-mean anomaly (GW)
+    over the PGW − Control pairs.
 
-    A red border around a cell indicates it exceeds the stress threshold.
-    One subplot per perturbation member only (anomaly = pert − ctrl, so
-    showing ctrl values here is not meaningful).
+    A red border marks cells where every pair exceeds the stress threshold
+    (a pair with no data for that cell does not count as exceeding).
 
-    Output: tell_interconnection_stress_heatmap.png
+    Output: tell_interconnection_stress_heatmap_<year>.png
     """
-    pert_members = [m for m in PERTURBATION_MEMBERS
-                    if m in ic_df["data_source"].unique()]
+    pairs = _pair_members(ic_df)
     ics   = [ic for ic in INTERCONNECTIONS if ic in ic_df["interconnection"].unique()]
     dates = sorted(ic_df["date"].unique())
     date_labels = [pd.Timestamp(d).strftime("%b %d") for d in dates]
 
-    n_members = len(pert_members)
-    fig, axes = plt.subplots(
-        1, n_members,
-        figsize=(6 * n_members, 3.0 + len(ics) * 0.9),
-        squeeze=False,
-    )
+    # pair × interconnection × date
+    tables = {ic: _pair_table(ic_df, ic, "sum_anomaly_GW", dates).reindex(columns=pairs)
+              for ic in ics}
+    stack = np.stack([np.stack([tables[ic][m].to_numpy() for ic in ics]) for m in pairs])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)   # all-NaN cells → NaN
+        mean = np.nanmean(stack, axis=0)
+    all_exceed = np.all(stack > stress_threshold_gw, axis=0)   # NaN → False
+    vmax = float(np.nanmax(np.abs(mean))) if np.isfinite(mean).any() else 1.0
 
-    # Shared colour scale across all perturbation members
-    all_vals = [
-        ic_df.loc[ic_df["data_source"] == m, "sum_anomaly_GW"].values
-        for m in pert_members
-    ]
-    vmax = max((np.nanmax(np.abs(v)) for v in all_vals if len(v)), default=1.0)
+    fig, ax = plt.subplots(figsize=(10, 3.0 + len(ics) * 0.9))
+    im = ax.imshow(mean, aspect="auto", cmap="RdBu_r", vmin=-vmax, vmax=vmax,
+                   interpolation="nearest")
+    plt.colorbar(im, ax=ax, label="Anomaly (GW)", shrink=0.8)
 
-    for col, member in enumerate(pert_members):
-        ax  = axes[0, col]
-        sub = ic_df[ic_df["data_source"] == member]
+    for ci, di in zip(*np.nonzero(all_exceed)):
+        ax.add_patch(plt.Rectangle(
+            (di - 0.5, ci - 0.5), 1, 1,
+            fill=False, edgecolor="red", linewidth=2,
+        ))
 
-        # Build matrix: rows = interconnections, cols = dates
-        mat = np.full((len(ics), len(dates)), np.nan)
-        for ci, ic in enumerate(ics):
-            for di, d in enumerate(dates):
-                cell = sub.loc[
-                    (sub["interconnection"] == ic) & (sub["date"] == d),
-                    "sum_anomaly_GW",
-                ]
-                if not cell.empty:
-                    mat[ci, di] = float(cell.iloc[0])
-
-        im = ax.imshow(
-            mat,
-            aspect="auto",
-            cmap="RdBu_r",
-            vmin=-vmax, vmax=vmax,
-            interpolation="nearest",
-        )
-        plt.colorbar(im, ax=ax, label="Anomaly (GW)", shrink=0.8)
-
-        # Red borders on cells above threshold
-        for ci in range(len(ics)):
-            for di in range(len(dates)):
-                if not np.isnan(mat[ci, di]) and mat[ci, di] > stress_threshold_gw:
-                    ax.add_patch(plt.Rectangle(
-                        (di - 0.5, ci - 0.5), 1, 1,
-                        fill=False, edgecolor="red", linewidth=2,
-                    ))
-
-        ax.set_xticks(range(len(dates)))
-        ax.set_xticklabels(date_labels, rotation=30, ha="right",
-                           fontsize=FONTSIZE)
-        ax.set_yticks(range(len(ics)))
-        ax.set_yticklabels(ics, fontsize=FONTSIZE)
-        ax.set_title(display_name(member), fontsize=FONTSIZE, fontweight="bold")
+    ax.set_xticks(range(len(dates)))
+    ax.set_xticklabels(date_labels, rotation=30, ha="right", fontsize=FONTSIZE)
+    ax.set_yticks(range(len(ics)))
+    ax.set_yticklabels(ics, fontsize=FONTSIZE)
+    ax.set_title(f"Ensemble mean (n={len(pairs)} PGW − Control pairs)",
+                 fontsize=FONTSIZE, fontweight="bold")
 
     fig.suptitle(
         "Interconnection-level load anomaly (GW) per day\n"
-        f"Red border = exceeds {stress_threshold_gw:.1f} GW stress threshold  |  {year}",
+        f"Red border = all {len(pairs)} pairs exceed {stress_threshold_gw:.1f} GW  |  {year}",
         fontsize=FONTSIZE,
     )
     fig.tight_layout()
@@ -641,16 +551,16 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Heatwave event/year to analyse — must match the --year used when "
             "running analyze_tell_heatwave.py, since it determines the default "
-            "--merged-csv filename."
+            "--load-csv filename."
         ),
     )
     p.add_argument(
-        "--merged-csv",
+        "--load-csv",
         type=Path,
         default=None,
         metavar="CSV",
         help=(
-            "Path to tell_heatwave_merged_<year>.csv (produced by "
+            "Path to tell_load_daily_all_<year>.csv (written by "
             "analyze_tell_heatwave.py). Defaults to the file for --year."
         ),
     )
@@ -679,13 +589,6 @@ def parse_args() -> argparse.Namespace:
             "Default 0.0 counts any positive anomaly."
         ),
     )
-    p.add_argument(
-        "--min-hw-frac",
-        type=float,
-        default=0.0,
-        metavar="FRAC",
-        help="Minimum BA heatwave-area fraction; rows at or below this are dropped.",
-    )
     return p.parse_args()
 
 
@@ -694,11 +597,11 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 def main() -> None:
     args = parse_args()
-    merged_csv = args.merged_csv if args.merged_csv is not None else _default_merged_csv(args.year)
+    load_csv = args.load_csv if args.load_csv is not None else _default_load_csv(args.year)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Load data ───────────────────────────────────────────────────────────
-    merged, _ = load_data(merged_csv, args.ba_map, args.min_hw_frac)
+    merged, _ = load_data(load_csv, args.ba_map)
 
     # ── Analysis A: aggregate by interconnection ────────────────────────────
     log.info("Analysis A — aggregating load anomaly by interconnection …")

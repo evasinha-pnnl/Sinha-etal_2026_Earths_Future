@@ -161,7 +161,7 @@ def _default_filter_csv(year: int) -> Path:
 DEFAULT_HW_FRAC_THRESHOLD = 0.0
 
 # Perturbation members to analyse
-PERTURBATION_MEMBERS: list[str] = ["2011_SSP245_p0", "2011_SSP245_p12", "2011_SSP245_p24", "2011_SSP245_n12", "2011_SSP245_n24", "2021_SSP245_p0"]
+PERTURBATION_MEMBERS: list[str] = ["2011_SSP245_p0", "2011_SSP245_p12", "2011_SSP245_p24", "2011_SSP245_n12", "2011_SSP245_n24", "2021_SSP245_p0", "2021_SSP245_p24", "2021_SSP245_n24"]
 
 # Number of top BAs to show in summary plots (ranked by mean total anomaly)
 N_TOP_BAS = 8
@@ -174,6 +174,8 @@ MEMBER_COLORS: dict[str, str] = {
     "2011_SSP245_n12":   "#7f7f7f",   # gray
     "2011_SSP245_n24":   "#8c564b",   # brown
     "2021_SSP245_p0":    "#1f77b4",   # blue
+    "2021_SSP245_p24":   "#1f77b4",   # blue
+    "2021_SSP245_n24":   "#1f77b4",   # blue
 }
 
 # Neutral colour for the mean-shift baseline bars

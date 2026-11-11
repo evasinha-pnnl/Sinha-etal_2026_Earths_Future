@@ -101,8 +101,8 @@ _PANEL_ROWS_2011: list[tuple[str, list[str]]] = [
 ]
 
 _PANEL_ROWS_2021: list[tuple[str, list[str]]] = [
-    ("Control", ["2021_CTRL_p0"]),
-    ("PGW",     ["2021_SSP245_p0"]),
+    ("Control", ["2021_CTRL_p0",   "2021_CTRL_p24",   "2021_CTRL_n24"]),
+    ("PGW",     ["2021_SSP245_p0", "2021_SSP245_p24", "2021_SSP245_n24"]),
 ]
 
 # Column header labels (one per member in the order above)
@@ -116,6 +116,8 @@ _COL_LABELS_2011: list[str] = [
 
 _COL_LABELS_2021: list[str] = [
     "Initial",
+    "Initial +24 hr",
+    "Initial -24 hr",
 ]
 
 

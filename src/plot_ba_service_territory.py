@@ -3,7 +3,7 @@ plot_ba_service_territory.py
 -----------------------------
 Plot the county-level service territory for one or more Balancing Authorities
 (BAs) overlaid on a CONUS basemap, and produce a single map showing all three
-NERC interconnections (EIC, WECC, ERCOT) coloured by interconnection.
+NERC interconnections (EIC, WIC, ERCOT) coloured by interconnection.
 
 Figures produced
 ----------------
@@ -77,7 +77,7 @@ STATE_COLOR = "#555555"
 # Colours for the three NERC interconnections
 INTERCONNECTION_COLORS: dict[str, str] = {
     "EIC":   "#1f77b4",   # blue
-    "WECC":  "#2ca02c",   # green
+    "WIC":  "#2ca02c",   # green
     "ERCOT": "#ff7f0e",   # orange
 }
 
@@ -170,7 +170,7 @@ def load_interconnection_fips(
 
     Returns
     -------
-    dict with keys ``'EIC'``, ``'WECC'``, ``'ERCOT'`` and values that are
+    dict with keys ``'EIC'``, ``'WIC'``, ``'ERCOT'`` and values that are
     sets of integer County_FIPS codes.
     """
     log.info("Building interconnection → county FIPS mapping")
@@ -276,7 +276,7 @@ def plot_ba_service_territory(
 
     ax.legend(
         handles=[
-            mpatches.Patch(color=BA_COLOR,   label=f"{ba_code} {plot_str} service territory"),
+            mpatches.Patch(color=BA_COLOR,   label=f"{ba_code} {plot_str}"), #service territory"),
             mpatches.Patch(color=BASE_COLOR,  label="Other CONUS counties"),
         ],
         loc="lower left", fontsize=FONTSIZE - 1, frameon=True,
@@ -312,7 +312,17 @@ def plot_all_bas_map(
     save_images : bool
         Write PNG when True.
     """
-    _BA_PALETTE = ["#d62728", "#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd"]
+    #_BA_PALETTE = ["#d62728", "#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd"]
+    _BA_PALETTE = [
+    "#D55E00",  # vermillion
+    "#0072B2",  # blue
+    "#009E73",  # bluish green
+    "#E69F00",  # orange
+    "#CC79A7",  # reddish purple
+    "#56B4E9",  # sky blue
+    "#F0E442",  # yellow
+    "#004D40",  # dark teal (in place of black)
+]
     ba_color_map = {ba: _BA_PALETTE[i % len(_BA_PALETTE)]
                     for i, ba in enumerate(ba_list)}
 
@@ -331,11 +341,11 @@ def plot_all_bas_map(
     states_gdf.boundary.plot(ax=ax, edgecolor=STATE_COLOR, linewidth=0.6)
 
     legend_handles = [
-        mpatches.Patch(color=ba_color_map[ba], label=f"{ba} BA service territory")
+        mpatches.Patch(color=ba_color_map[ba], label=f"{ba}")# BA  service territory")
         for ba in ba_list
     ] + [mpatches.Patch(color=BASE_COLOR, label="Other CONUS counties")]
     ax.legend(handles=legend_handles, loc="lower left",
-              fontsize=FONTSIZE - 1, frameon=True)
+              fontsize=FONTSIZE - 1, frameon=True, ncols=2)
 
     fname = "BA_Service_Territory_" + "_".join(ba_list) + ".png"
     _save_close(fig, image_output_dir / fname, image_resolution, save_images)
@@ -382,7 +392,7 @@ def plot_interconnection_map(
 
     legend_handles = [
         mpatches.Patch(color=INTERCONNECTION_COLORS[ic], label=ic)
-        for ic in ["EIC", "WECC", "ERCOT"] if ic in ic_fips
+        for ic in ["EIC", "WIC", "ERCOT"] if ic in ic_fips
     ] + [mpatches.Patch(color=BASE_COLOR, label="Unassigned")]
     ax.legend(handles=legend_handles, loc="lower left",
               fontsize=FONTSIZE - 1, frameon=True,
@@ -401,7 +411,11 @@ if __name__ == "__main__":
     #BA_LIST = ["PJM", "MISO", "SWPP", "ERCO"]
     #BA_LIST = ["AECI", "LGEE", "SWPP", "PJM"]
     BA_LIST = ["AZPS", "PACE", "PNM", "WACM"]
-    BA_LIST = ["BPAT", "GCPD", "IPCO", "PACW"]
+    BA_LIST = ["AZPS", "ERCO", "MISO", "PACE", "PNM", "PJM", "SWPP", "WACM"]
+    #BA_LIST = ["AVA", "BPAT", "CHPD", "DOPD", "GCPD", "IPCO", "PACW", "PGE", "PSEI", "SCL", "TPWR"]
+    #BA_LIST = ["AECI", "ERCO", "LGEE", "MISO", "NYIS", "PJM", "SWPP"]
+    #BA_LIST = ["CISO", "NEVP", "NWMT", "PACE", "WACM", "WALC", "WAUW"]
+    #BA_LIST = ["BPAT", "GCPD", "IPCO", "PACW"]
 
     COUNTY_SHP = Path(
         "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"

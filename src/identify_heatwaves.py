@@ -24,6 +24,10 @@ Workflow
 11. Perform 3-D (time × space) event labelling; compute duration, peak area, and
     mean anomaly for every event; plot a scatter of peak area vs. duration.
 
+The spatial maps from steps 6, 8 and 10 are also written as NetCDF
+(``<data_source>_<var>_<tag>_<yr>.nc``) for ensemble statistics in
+``plot_ensemble_stats.py``.
+
 Authors
 -------
 Eva Sinha  <eva.sinha@pnnl.gov>
@@ -98,7 +102,7 @@ EAMXX_DATA_CONFIG_2011 = dict(
 ANALYSIS_CONFIG_2011 = dict(
     yr_start=2011, yr_end=2011,
     mon_start=7,   mon_end=7,
-    day_start=17,  day_end=24,   # day_start=17: first day is spin-up, skip it
+    day_start=17,  day_end=29,   # day_start=17: first day is spin-up, skip it
 )
 
 # ── June–July 2021 heatwave (24 June – 2 July 2021) ────────────────────────
@@ -116,7 +120,7 @@ EAMXX_DATA_CONFIG_2021 = dict(
 ANALYSIS_CONFIG_2021 = dict(
     yr_start=2021, yr_end=2021,
     mon_start=6,   mon_end=7,
-    day_start=24,  day_end=7,
+    day_start=25,  day_end=5,
 )
 
 # ── Active configs (resolved from HEATWAVE_SELECTOR) ───────────────────────
@@ -208,6 +212,35 @@ def _save_timeseries(
     log.info("Saved %s → %s", tag, fpath)
 
 
+def _save_netcdf(
+    da: xr.DataArray,
+    tag: str,
+    varnames: str,
+    yr: int,
+    data_source: str,
+    long_name: str,
+    units: str,
+    period: str,
+    output_dir: Path | None = None,
+) -> None:
+    """Save a 2-D (lat, lon) map as NetCDF for ensemble statistics.
+
+    The file sits next to the PNG of the same *tag* and is read by
+    ``plot_ensemble_stats.py``.
+    """
+    fpath = _out_fname(tag, varnames, yr, data_source, ext="nc", output_dir=output_dir)
+    da = da.copy()
+    da.name = tag
+    da.attrs = dict(
+        long_name=long_name,
+        units=units,
+        data_source=data_source,
+        period=period,
+    )
+    da.to_netcdf(fpath)
+    log.info("Saved %s NetCDF → %s", tag, fpath)
+
+
 def _plot_spatial_on_axis(
     ax: Any,
     da: xr.DataArray,
@@ -242,7 +275,7 @@ def _plot_spatial_on_axis(
         Whether to add a colorbar to this specific subplot (default False).
     vmin, vmax : float | None
         Explicit min/max values for color scaling (ignored if levels/norm provided).
-    
+
     Returns
     -------
     im : mappable
@@ -266,7 +299,7 @@ def _plot_spatial_on_axis(
         'add_colorbar': add_colorbar,
         'add_labels': False,
     }
-    
+
     # Add levels/norm if provided, otherwise use vmin/vmax
     if levels is not None:
         plot_kwargs['levels'] = levels
@@ -400,13 +433,35 @@ def _build_mask_and_anomaly(
 
     Returns
     -------
-    heatwave_mask : DataArray — True where Tmax > threshold; NaN for ocean
+    heatwave_mask : DataArray — True where Tmax > threshold; NaN where either
+                    Tmax or the ERA5 threshold is missing (ERA5 ocean cells)
     anomaly       : DataArray — Tmax minus threshold (all times)
     """
-    above_threshold = ds.groupby("time.dayofyear") > ds_q90
-    heatwave_mask   = above_threshold.where(ds.notnull())
     anomaly         = ds.groupby("time.dayofyear") - ds_q90
+    above_threshold = ds.groupby("time.dayofyear") > ds_q90
+    # Mask on the anomaly, not on ds alone: EAMxx has values over the ocean
+    # where the ERA5 threshold is NaN, and "Tmax > NaN" would give False
+    # (counted as a non-heatwave day) instead of NaN.
+    heatwave_mask   = above_threshold.where(anomaly.notnull())
     return heatwave_mask, anomaly
+
+
+def load_era5_land_mask(
+    era5_hist_cfg: dict = ERA5_HIST_CONFIG,
+    hist_cfg: dict = HIST_CONFIG,
+) -> xr.DataArray:
+    """Boolean (lat, lon) mask, True where ERA5 has data (land cells).
+
+    Read from the first ERA5 historical file, on the same grid as the
+    threshold and the per-member outputs.
+    """
+    fname = (
+        f"{era5_hist_cfg['fpath']}{era5_hist_cfg['fname_abb']}"
+        f"{hist_cfg['yr_start']:04d}-{hist_cfg['mon_start']:02d}_CONUS.nc"
+    )
+    with xr.open_dataset(fname) as ds:
+        land = ds[era5_hist_cfg["varnames"]].isel(time=0).notnull().load()
+    return land.reset_coords(drop=True).rename("era5_land")
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +497,33 @@ def load_and_prepare(
     anomaly       : DataArray (time, lat, lon) – Tmax minus threshold (all times)
     ds            : DataArray (time, lat, lon) – EAMxx daily-max on ERA5 grid
     ds_q90        : DataArray (dayofyear, lat, lon) – ERA5-derived threshold
+    """
+    ds = load_eamxx_daily_max(eamxx_data_cfg, analysis_cfg, target_grid=ds_hist)
+    heatwave_mask, anomaly = _build_mask_and_anomaly(ds, ds_q90)
+    return heatwave_mask, anomaly, ds, ds_q90
+
+
+def load_eamxx_daily_max(
+    eamxx_data_cfg: dict,
+    analysis_cfg: dict,
+    target_grid: xr.DataArray,
+) -> xr.DataArray:
+    """
+    Read EAMxx analysis data, interpolate to the lat/lon of *target_grid*
+    (bilinear), and return daily maximum temperatures.
+
+    Parameters
+    ----------
+    eamxx_data_cfg : dict
+        Keys: fpath, fname_abb, eamxx_varname, varnames.
+    analysis_cfg : dict
+        Keys: yr_start, yr_end, mon_start, mon_end, day_start, day_end.
+    target_grid : DataArray
+        Any array on the ERA5 grid (only its lat / lon coordinates are used).
+
+    Returns
+    -------
+    ds : DataArray (time, lat, lon) – EAMxx daily-max on the target grid
     """
 
     # --- EAMxx analysis data ------------------------------------------------
@@ -496,7 +578,7 @@ def load_and_prepare(
 
     # --- interpolate EAMxx to ERA5 lat/lon coordinates ----------------------
     log.info("Interpolating EAMxx data to ERA5 coordinates (bilinear) …")
-    ds = ds.interp(lat=ds_hist.lat, lon=ds_hist.lon, method="linear")
+    ds = ds.interp(lat=target_grid.lat, lon=target_grid.lon, method="linear")
 
     # --- daily maximum temperature ------------------------------------------
     ds = ds.resample(time="1D").max()
@@ -505,9 +587,7 @@ def load_and_prepare(
     # and downstream pd.Timestamp usage work regardless of the NetCDF calendar.
     if hasattr(ds.indexes["time"], "to_datetimeindex"):
         ds = ds.assign_coords(time=ds.indexes["time"].to_datetimeindex())
-
-    heatwave_mask, anomaly = _build_mask_and_anomaly(ds, ds_q90)
-    return heatwave_mask, anomaly, ds, ds_q90
+    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +684,15 @@ def plot_frequency(
         out_fname=_out_fname("heatwave_frequency", varnames, analysis_cfg["yr_start"], data_source, output_dir=output_dir),
         fig_extent=fig_extent,
     )
+    # fillna(False) above turns ocean cells into 0; restore NaN there in the
+    # NetCDF so ocean does not count as "0 heatwave days" in ensemble stats.
+    valid = heatwave_mask.notnull().any(dim="time")
+    _save_netcdf(
+        freq_days.where(valid), "heatwave_frequency", varnames,
+        analysis_cfg["yr_start"], data_source,
+        long_name="Heatwave-day frequency", units="days", period=prefix,
+        output_dir=output_dir,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +718,12 @@ def plot_max_anomaly(
         title=f"{prefix} - Maximum heatwave anomaly (K)",
         out_fname=_out_fname("max_heatwave_anomaly", varnames, analysis_cfg["yr_start"], data_source, output_dir=output_dir),
         fig_extent=fig_extent,
+    )
+    _save_netcdf(
+        max_anom, "max_heatwave_anomaly", varnames,
+        analysis_cfg["yr_start"], data_source,
+        long_name="Maximum heatwave anomaly", units="K", period=prefix,
+        output_dir=output_dir,
     )
 
 
@@ -867,7 +962,7 @@ def plot_longest_duration(
         vectorize=True,
         dask="parallelized",
         output_dtypes=[float],
-    )
+    ).compute()  # computed once; reused for CSV, NetCDF and the plot
     # Save per-grid-cell longest duration to CSV for ensemble comparison
     csv_path = _out_fname("longest_heatwave_duration", varnames, analysis_cfg["yr_start"], data_source, ext="csv", output_dir=output_dir)
     df_dur = longest_duration.to_dataframe(name="longest_duration").reset_index()
@@ -885,6 +980,12 @@ def plot_longest_duration(
         title=f"{prefix} - Longest heatwave duration (days)",
         out_fname=_out_fname("longest_heatwave_duration", varnames, analysis_cfg["yr_start"], data_source, output_dir=output_dir),
         fig_extent=fig_extent,
+    )
+    _save_netcdf(
+        longest_duration, "longest_heatwave_duration", varnames,
+        analysis_cfg["yr_start"], data_source,
+        long_name="Longest heatwave duration", units="days", period=prefix,
+        output_dir=output_dir,
     )
 
 

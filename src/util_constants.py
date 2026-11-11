@@ -2,8 +2,8 @@
 util_constants.py
 -----------------
 Shared configuration constants used across the TELL–heatwave analysis
-scripts (analyze_tell_heatwave.py, decompose_load_anomaly.py,
-interconnection_stress.py, mean_shift_decompose.py).
+scripts (analyze_tell_heatwave.py, compare_heatwaves.py,
+interconnection_stress.py, mean_shift_decompose.py, plot_affected_ba.py).
 
 Centralising these here avoids copy-paste drift between files.
 """
@@ -26,8 +26,12 @@ MEMBER_COLORS: dict[str, str] = {
     "2011_SSP245_p24":   "#ff0000",   # red
     "2011_SSP245_n12":   "#7f7f7f",   # gray
     "2011_SSP245_n24":   "#008000",   # green
-    "2021_CTRL_p0":      "#1f77b4",   # blue
-    "2021_SSP245_p0":    "#1f77b4",   # blue
+    "2021_CTRL_p0":      "#2a78d6",   # blue
+    "2021_CTRL_p24":     "#eb6834",   # orange
+    "2021_CTRL_n24":     "#1baf7a",   # aqua
+    "2021_SSP245_p0":    "#2a78d6",   # blue
+    "2021_SSP245_p24":   "#eb6834",   # orange
+    "2021_SSP245_n24":   "#1baf7a",   # aqua
 }
 
 # ---------------------------------------------------------------------------
@@ -40,9 +44,32 @@ ANOMALY_PAIRS: dict[str, str] = {
     "2011_SSP245_n12":   "2011_CTRL_n12",
     "2011_SSP245_n24":   "2011_CTRL_n24",
     "2021_SSP245_p0":    "2021_CTRL_p0",
+    "2021_SSP245_p24":   "2021_CTRL_p24",
+    "2021_SSP245_n24":   "2021_CTRL_n24",
 }
 
 PERTURBATION_MEMBERS: list[str] = list(ANOMALY_PAIRS.keys())
+
+# ---------------------------------------------------------------------------
+# Ensemble-summary styles: one entry per experiment (mean line + range band)
+# ---------------------------------------------------------------------------
+EXPERIMENT_STYLES: dict[str, dict[str, str]] = {
+    "CTRL":   dict(label="Control", color="#2a78d6"),
+    "SSP245": dict(label="PGW",     color="#eb6834"),
+}
+
+
+def members_by_experiment(available) -> dict[str, list[str]]:
+    """Split the member labels in *available* into Control and PGW lists.
+
+    Keys match EXPERIMENT_STYLES ("CTRL", "SSP245"); members keep the
+    ANOMALY_PAIRS order, so Control and PGW lists line up pair by pair.
+    """
+    available = set(available)
+    return {
+        "CTRL":   [m for m in ANOMALY_PAIRS.values() if m in available],
+        "SSP245": [m for m in ANOMALY_PAIRS.keys()   if m in available],
+    }
 
 # ---------------------------------------------------------------------------
 # Default font size for figures
@@ -67,7 +94,11 @@ _DISPLAY_NAMES: dict[str, str] = {
     "2011_SSP245_n12":   "SSP245 -12h",
     "2011_SSP245_n24":   "SSP245 -24h",
     "2021_CTRL_p0":      "2021 Control",
+    "2021_CTRL_p24":     "2021 Control +24h",
+    "2021_CTRL_n24":     "2021 Control -24h",
     "2021_SSP245_p0":    "2021 SSP245",
+    "2021_SSP245_p24":   "2021 SSP245 +24h",
+    "2021_SSP245_n24":   "2021 SSP245 -24h",
 }
 
 

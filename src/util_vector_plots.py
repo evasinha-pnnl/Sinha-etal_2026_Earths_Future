@@ -1,5 +1,6 @@
 from pathlib import Path
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import logging
 import matplotlib.pyplot as plt
@@ -29,6 +30,32 @@ def _resolve_out_path(fname) -> Path:
         out = p
         out.parent.mkdir(parents=True, exist_ok=True)
     return out
+
+# -----------------------------------------------------------
+def plot_mean_range(ax, x, table, cols, color, label, n_label=None,
+                    band_color=None, alpha=0.25, **line_kw):
+    """Draw the ensemble mean of ``table[cols]`` as a line and its min–max as
+    a shaded band, on *ax* against *x*.
+
+    Legend entries are "<label> range" and "<label> mean (<n_label>)", with
+    *n_label* defaulting to "n=<len(cols)>".  Extra keyword arguments (e.g.
+    ``marker``) are passed to the mean line's ``ax.plot``.
+
+    Returns
+    -------
+    DataFrame with columns mean, min, max (index of *table*).
+    """
+    stats = pd.DataFrame({
+        "mean": table[cols].mean(axis=1),
+        "min":  table[cols].min(axis=1),
+        "max":  table[cols].max(axis=1),
+    })
+    n_label = n_label or f"n={len(cols)}"
+    ax.fill_between(x, stats["min"], stats["max"], color=band_color or color,
+                    alpha=alpha, linewidth=0, label=f"{label} range")
+    ax.plot(x, stats["mean"], color=color, linewidth=2,
+            label=f"{label} mean ({n_label})", **line_kw)
+    return stats
 
 # -----------------------------------------------------------
 # Make line plot
