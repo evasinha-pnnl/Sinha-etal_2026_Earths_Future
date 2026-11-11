@@ -5,10 +5,56 @@ Shared configuration constants used across the TELL–heatwave analysis
 scripts (analyze_tell_heatwave.py, compare_heatwaves.py,
 interconnection_stress.py, mean_shift_decompose.py, plot_affected_ba.py).
 
-Centralising these here avoids copy-paste drift between files.
+Centralising these here avoids copy-paste drift between files.  Input data
+locations are also defined here (see "Input data locations" below).
 """
 
 from __future__ import annotations
+
+import os
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Input data locations
+# ---------------------------------------------------------------------------
+# By default every path resolves to the NERSC location used for the paper.
+# Set the DATA_ROOT environment variable to the unpacked data archive
+# instead, and every path resolves to the matching subdirectory below it:
+#   export DATA_ROOT=/path/to/EAMxx-TELL-data
+DATA_ROOT = os.environ.get("DATA_ROOT")
+
+_NERSC_PROJECT = "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"
+
+
+def _data_path(archive_subdir: str, nersc_path: str) -> Path:
+    """Return ``DATA_ROOT/archive_subdir`` if DATA_ROOT is set, else *nersc_path*."""
+    if DATA_ROOT:
+        return Path(DATA_ROOT) / archive_subdir
+    return Path(nersc_path)
+
+
+# Regridded SCREAM (EAMxx) output, one subdirectory per ensemble member
+EAMXX_REGRID_DIR = _data_path("eamxx_regridded", "/pscratch/sd/j/jli628/EAMxx_regridding")
+# Reprocessed SCREAM output holding skin temperature (plot_pgw_amplification.py --variable skt)
+EAMXX_SKT_DIR    = _data_path("eamxx_skt", "/pscratch/sd/e/esinha/EAMxx")
+# PGW temperature deltas (SSP2-4.5 2031-2060 minus 1981-2010)
+PGW_DELTA_DIR    = _data_path("pgw_deltas", "/pscratch/sd/j/jli628/EAMxx_regridding/PGW_detals")
+# ERA5 2-m temperature over CONUS, 1981-2010 (heatwave threshold and land mask)
+ERA5_DIR         = _data_path("era5", "/pscratch/sd/e/esinha/ERA5_CONUS")
+# TELL hourly load output, one subdirectory per ensemble member / scenario
+TELL_OUTPUT_DIR  = _data_path("tell_outputs", f"{_NERSC_PROJECT}/TELL_outputs")
+# EIA-930 balance files (EIA930_BALANCE_<year>_<Jan_Jun|Jul_Dec>.csv)
+EIA930_DIR       = _data_path("eia930", f"{_NERSC_PROJECT}/EIA_930")
+# im3components wrf_to_tell files: grid-cell -> county weights, plus
+# wrf_to_tell_ancillary_data/ (BA service territory, county shapefile)
+WRF_TO_TELL_DIR  = _data_path(
+    "wrf_to_tell", f"{_NERSC_PROJECT}/im3components/im3components/wrf_to_tell"
+)
+
+# Intermediate products (per-member heatwave maps, CSVs, caches) and figures.
+# Override with OUTPUT_ROOT to read archived intermediate products from
+# elsewhere; defaults to src/outputs/ next to these scripts.
+OUTPUT_ROOT = Path(os.environ.get("OUTPUT_ROOT", Path(__file__).parent / "outputs"))
 
 # ---------------------------------------------------------------------------
 # Ensemble member colours  (consistent across all figures)

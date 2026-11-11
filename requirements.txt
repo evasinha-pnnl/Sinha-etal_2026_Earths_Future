@@ -1,7 +1,9 @@
-# Requirements for the LDRD 2026 heatwave analysis scripts
-# Install into the py39_tell conda environment:
-#   conda activate py39_tell
+# Requirements for the heatwave analysis scripts
+# Install into the py313 conda environment used on Perlmutter:
+#   conda activate py313
 #   pip install -r requirements.txt
+# For an exact record of the environment used for the paper, see
+# environment.yml (exported with `conda env export --from-history`).
 #
 # Minimum version pins are based on the APIs used in this project;
 # exact versions in the development environment are noted in comments.
@@ -11,13 +13,18 @@ numpy>=1.24           # array operations, searchsorted, polyfit
 pandas>=2.0           # DataFrame, groupby, read_csv/parquet, Timestamp
 scipy>=1.10           # (used transitively; OLS via numpy.polyfit is sufficient)
 xarray>=2023.1        # NetCDF loading, DataArray operations
+netCDF4>=1.6          # NetCDF backend for xarray
 
 # ── Climate / geospatial ─────────────────────────────────────────────────────
 cartopy>=0.21         # map projections for spatial plots
 pyproj>=3.5           # coordinate reference system transforms (via cartopy)
+geopandas>=0.14       # county shapefiles (plot_ba_service_territory.py)
+shapely>=2.0          # box geometries (plot_pgw_amplification.py)
 
 # ── Visualisation ────────────────────────────────────────────────────────────
 matplotlib>=3.7       # all figure generation
+seaborn>=0.12         # line/scatter helpers (util_vector_plots.py)
+pillow>=10.0          # figure compositing (merge_images.py)
 
 # ── I/O ──────────────────────────────────────────────────────────────────────
 fastparquet>=2023.4   # read/write .parquet files (grid_cell_to_ba.EAMxx.parquet)

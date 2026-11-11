@@ -32,7 +32,9 @@ from __future__ import annotations
 
 # ── PROJ database path must be set BEFORE geopandas/pyproj are imported ─────
 import os
-_PROJ_DB = "/global/homes/e/esinha/.conda/envs/py313/share/proj"
+# Defaults to the active conda environment's PROJ database
+import sys
+_PROJ_DB = os.environ.get("PROJ_DATA", os.path.join(sys.prefix, "share", "proj"))
 os.environ["PROJ_DATA"]    = _PROJ_DB
 os.environ["PROJ_LIB"]     = _PROJ_DB
 os.environ["PROJ_NETWORK"] = "OFF"
@@ -50,6 +52,8 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import geopandas as gpd
+
+from util_constants import OUTPUT_ROOT, WRF_TO_TELL_DIR
 import pandas as pd
 
 # ---------------------------------------------------------------------------
@@ -417,23 +421,10 @@ if __name__ == "__main__":
     #BA_LIST = ["CISO", "NEVP", "NWMT", "PACE", "WACM", "WALC", "WAUW"]
     #BA_LIST = ["BPAT", "GCPD", "IPCO", "PACW"]
 
-    COUNTY_SHP = Path(
-        "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"
-        "/im3components/im3components/wrf_to_tell"
-        "/wrf_to_tell_ancillary_data/tl_2020_us_county.shp"
-    )
-    BA_CSV = Path(
-        "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"
-        "/im3components/im3components/wrf_to_tell"
-        "/wrf_to_tell_ancillary_data/ba_service_territory_2019.csv"
-    )
-    INTERCONNECTION_CSV = Path(
-        "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"
-        "/src/BA_to_Interconnection_Mapping.csv"
-    )
-    IMAGE_OUTPUT_DIR = Path(
-        "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL/src/outputs/BA_service_territory"
-    )
+    COUNTY_SHP = WRF_TO_TELL_DIR / "wrf_to_tell_ancillary_data" / "tl_2020_us_county.shp"
+    BA_CSV = WRF_TO_TELL_DIR / "wrf_to_tell_ancillary_data" / "ba_service_territory_2019.csv"
+    INTERCONNECTION_CSV = Path(__file__).parent / "BA_to_Interconnection_Mapping.csv"
+    IMAGE_OUTPUT_DIR = OUTPUT_ROOT / "BA_service_territory"
 
     # Load county shapefile and state boundaries once — reused for all plots
     county_gdf = load_county_gdf(COUNTY_SHP)

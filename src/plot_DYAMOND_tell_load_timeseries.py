@@ -33,6 +33,8 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from util_constants import EIA930_DIR, OUTPUT_ROOT, TELL_OUTPUT_DIR
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -324,9 +326,9 @@ if __name__ == "__main__":
     YEAR     = "2016"
     SCENARIO = "DYAMOND1"
 
-    TELL_DATA_DIR    = Path("/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL/TELL_outputs")
-    EIA_DATA_DIR     = Path("/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL/EIA_930")
-    IMAGE_OUTPUT_DIR = Path("/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL/src/outputs") / SCENARIO
+    TELL_DATA_DIR    = TELL_OUTPUT_DIR
+    EIA_DATA_DIR     = EIA930_DIR
+    IMAGE_OUTPUT_DIR = OUTPUT_ROOT / SCENARIO
 
     # Read the full-year EIA data once and reuse it across all BAs
     eia_df = read_eia_data(EIA_DATA_DIR, YEAR)

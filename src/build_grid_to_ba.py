@@ -23,13 +23,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from util_constants import WRF_TO_TELL_DIR
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-_BASE = Path(
-    "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL"
-    "/im3components/im3components/wrf_to_tell"
-)
+_BASE = WRF_TO_TELL_DIR
 
 GRID_COUNTY_PQ = _BASE / "grid_cell_to_county_weight.EAMxx.parquet"
 BA_CSV = _BASE / "wrf_to_tell_ancillary_data" / "ba_service_territory_2019.csv"

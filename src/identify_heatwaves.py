@@ -51,6 +51,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import numpy as np
 
+from util_constants import EAMXX_REGRID_DIR, ERA5_DIR
 from util_contour_levels import myDict_clevels
 from util_heatwaves import (
     area_duration_anomaly,
@@ -84,7 +85,7 @@ HEATWAVE_SELECTOR = "2021"
 
 # ERA5 historical data — used only to build the percentile threshold
 ERA5_HIST_CONFIG = dict(
-    fpath="/pscratch/sd/e/esinha/ERA5_CONUS/",
+    fpath=f"{ERA5_DIR}/",
     fname_abb="elmforc.ERA5.c2018.0.25d.t2m.",
     varnames="t2m",           # ERA5 variable name (also used as the common name)
 )
@@ -93,7 +94,7 @@ HIST_CONFIG = dict(yr_start=1981, yr_end=2010, mon_start=1, mon_end=12)
 # ── July 2011 heatwave ──────────────────────────────────────────────────────
 # EAMxx simulation data — the analysis period
 EAMXX_DATA_CONFIG_2011 = dict(
-    fpath="/pscratch/sd/j/jli628/EAMxx_regridding/heatwave_201107_SSP245/",
+    fpath=f"{EAMXX_REGRID_DIR}/heatwave_201107_SSP245/",
     fname_abb="output.eamxx.INSTANT.nsteps_x9.",
     eamxx_varname="T_2m",     # native variable name inside the EAMxx files
     varnames="t2m",           # rename to this common name after reading
@@ -108,7 +109,7 @@ ANALYSIS_CONFIG_2011 = dict(
 # ── June–July 2021 heatwave (24 June – 2 July 2021) ────────────────────────
 # Update fpath to point to the actual EAMxx data for this event.
 EAMXX_DATA_CONFIG_2021 = dict(
-    fpath="/pscratch/sd/j/jli628/EAMxx_regridding/heatwave_202106/",  # ← update path
+    fpath=f"{EAMXX_REGRID_DIR}/heatwave_202106/",  # ← update path
     fname_abb="output.eamxx.INSTANT.nsteps_x9.",
     eamxx_varname="T_2m",
     varnames="t2m",

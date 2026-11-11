@@ -98,6 +98,7 @@ from run_heatwave_ensemble import (
     EAMXX_BASE_PATH,
     _MEMBER_LOOKUP,
 )
+from util_constants import OUTPUT_ROOT, TELL_OUTPUT_DIR
 from util_constants import (
     ANOMALY_PAIRS, EXPERIMENT_STYLES, FONTSIZE, MEMBER_COLORS,
     display_name, members_by_experiment, sorted_member_order,
@@ -121,9 +122,7 @@ log = logging.getLogger(__name__)
 # Root directory of TELL output CSVs.
 # Override with the TELL_BASE environment variable:
 #   export TELL_BASE=/path/to/TELL_outputs
-_TELL_BASE_DEFAULT = (
-    "/global/homes/e/esinha/wrk/E3SM_projects/LDRD-EAMxx-TELL/TELL_outputs"
-)
+_TELL_BASE_DEFAULT = TELL_OUTPUT_DIR
 TELL_BASE = Path(os.environ.get("TELL_BASE", _TELL_BASE_DEFAULT))
 
 # ── July 2011 heatwave ──────────────────────────────────────────────────────
@@ -228,7 +227,7 @@ def _resolve_anomaly_pairs(tell_member_dirs: dict[str, str]) -> dict[str, str]:
     }
 
 # Heatwave ensemble output root (produced by run_heatwave_ensemble.py)
-ENSEMBLE_OUTPUT = Path(__file__).parent / "outputs"
+ENSEMBLE_OUTPUT = OUTPUT_ROOT
 
 # Heatwave CSV tags & their value columns (must match _save_timeseries output)
 HW_AREA_TAG   = "largest_contiguous_heatwave_area_timeseries"

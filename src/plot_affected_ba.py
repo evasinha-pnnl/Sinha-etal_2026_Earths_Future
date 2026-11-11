@@ -35,14 +35,16 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from util_constants import ANOMALY_PAIRS, EXPERIMENT_STYLES, FONTSIZE, members_by_experiment
+from util_constants import (
+    ANOMALY_PAIRS, EXPERIMENT_STYLES, FONTSIZE, OUTPUT_ROOT, members_by_experiment,
+)
 from util_vector_plots import plot_mean_range
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Heatwave ensemble output root (produced by run_heatwave_ensemble.py)
-ENSEMBLE_OUTPUT = Path(__file__).parent / "outputs"
+ENSEMBLE_OUTPUT = OUTPUT_ROOT
 
 # Output directory for csv files containing the number of heatwave-affected BAs per day
 OUTPUT_DIR = ENSEMBLE_OUTPUT / "tell_heatwave_linkage"

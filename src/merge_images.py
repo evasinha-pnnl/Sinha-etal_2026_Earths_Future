@@ -32,6 +32,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from util_constants import OUTPUT_ROOT
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)s  %(message)s",
@@ -233,11 +235,11 @@ if __name__ == "__main__":
     SRC = Path(__file__).parent
 
     # ── Composite 1: TELL load time-series + BA service territory maps ────────
-    IMG_TOP  = SRC / "outputs/BA_service_territory/BA_Service_Territory_NYIS.png"
-    IMG_MID  = SRC / "outputs/BA_service_territory/BA_Service_Territory_PJM.png"
-    IMG_BOT  = SRC / "outputs/BA_service_territory/BA_Service_Territory_MISO.png"
-    IMG_LEFT = SRC / "outputs/DYAMOND1/DYAMOND1_TELL_BA_Hourly_Loads_2016.png"
-    IMG_OUT  = SRC / "outputs/DYAMOND1/DYAMOND1_TELL_BA_Hourly_Loads_2016_with_BA_extent.png"
+    IMG_TOP  = OUTPUT_ROOT / "BA_service_territory/BA_Service_Territory_NYIS.png"
+    IMG_MID  = OUTPUT_ROOT / "BA_service_territory/BA_Service_Territory_PJM.png"
+    IMG_BOT  = OUTPUT_ROOT / "BA_service_territory/BA_Service_Territory_MISO.png"
+    IMG_LEFT = OUTPUT_ROOT / "DYAMOND1/DYAMOND1_TELL_BA_Hourly_Loads_2016.png"
+    IMG_OUT  = OUTPUT_ROOT / "DYAMOND1/DYAMOND1_TELL_BA_Hourly_Loads_2016_with_BA_extent.png"
 
     composite_load = merge_ba_and_timeseries(
         img_left=Image.open(IMG_LEFT),
@@ -250,7 +252,7 @@ if __name__ == "__main__":
     log.info("Saved → %s", IMG_OUT)
 
     # ── Composite 2: heatwave panels for 2011 (2 × 5 grid) ───────────────────
-    ENSEMBLE_OUTPUT_DIR = SRC / "outputs"
+    ENSEMBLE_OUTPUT_DIR = OUTPUT_ROOT
     YEAR_2011 = 2011
     TAGS = [
         "heatwave_frequency",
@@ -267,7 +269,7 @@ if __name__ == "__main__":
             panel_rows=_PANEL_ROWS_2011,
             col_labels=_COL_LABELS_2011,
         )
-        panel_out = SRC / f"outputs/heatwave_panel_{TAG}_{YEAR_2011}.png"
+        panel_out = OUTPUT_ROOT / f"heatwave_panel_{TAG}_{YEAR_2011}.png"
         panel_out.parent.mkdir(parents=True, exist_ok=True)
         panel.save(panel_out)
         log.info("Saved → %s", panel_out)
@@ -283,7 +285,7 @@ if __name__ == "__main__":
             panel_rows=_PANEL_ROWS_2021,
             col_labels=_COL_LABELS_2021,
         )
-        panel_out = SRC / f"outputs/heatwave_panel_{TAG}_{YEAR_2021}.png"
+        panel_out = OUTPUT_ROOT / f"heatwave_panel_{TAG}_{YEAR_2021}.png"
         panel_out.parent.mkdir(parents=True, exist_ok=True)
         panel.save(panel_out)
         log.info("Saved → %s", panel_out)

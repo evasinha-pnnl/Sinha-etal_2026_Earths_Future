@@ -66,6 +66,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Re-use all analysis functions and shared config from identify_heatwaves
+from util_constants import EAMXX_REGRID_DIR, OUTPUT_ROOT
 from identify_heatwaves import (
     ERA5_HIST_CONFIG,
     HIST_CONFIG,
@@ -97,8 +98,8 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-EAMXX_BASE_PATH = "/pscratch/sd/j/jli628/EAMxx_regridding/"
-OUTPUT_BASE_DIR = Path(__file__).parent / "outputs"
+EAMXX_BASE_PATH = f"{EAMXX_REGRID_DIR}/"
+OUTPUT_BASE_DIR = OUTPUT_ROOT
 
 # Spatial map extent for 2021 members — focused on the Pacific Northwest
 # heatwave region, in place of the default CONUS-wide FIG_EXTENT.

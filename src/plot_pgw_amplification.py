@@ -19,7 +19,7 @@ The model field and the delta are always the same quantity (``--variable``):
                  analysis (identify_heatwaves.py) — with the 2 m air-
                  temperature delta ``tas``
   skt            EAMxx skin temperature, from the reprocessed outputs in
-                 /pscratch/sd/e/esinha/EAMxx/heatwave_<201107|2021>_<exp>_<pert>/,
+                 EAMXX_SKT_DIR/heatwave_<201107|2021>_<exp>_<pert>/ (util_constants.py),
                  with the skin-temperature delta ``skt``
 
 Inputs
@@ -114,6 +114,7 @@ import xarray as xr
 from identify_heatwaves import FIG_EXTENT, load_eamxx_daily_max, load_era5_land_mask
 from plot_ensemble_stats import EXPERIMENT_LABELS, _horizontal_colorbar, _plot_map
 from run_heatwave_ensemble import OUTPUT_BASE_DIR, PNW_FIG_EXTENT, _MEMBER_LOOKUP
+from util_constants import EAMXX_SKT_DIR, PGW_DELTA_DIR
 from util_vector_plots import plot_mean_range
 
 # ---------------------------------------------------------------------------
@@ -141,7 +142,6 @@ plt.rcParams.update({key: FONTSIZE for key in (
     "xtick.labelsize", "ytick.labelsize", "legend.fontsize", "legend.title_fontsize",
 )})
 
-PGW_DELTA_DIR = Path("/pscratch/sd/j/jli628/EAMxx_regridding/PGW_detals/")
 
 # Model field and its matching PGW delta, keyed by --variable (also the name
 # used in cache / output filenames).
@@ -166,8 +166,8 @@ VARIABLES = {
     "skt": dict(
         label="Daily max skin temperature",
         eamxx_fpath={
-            2011: "/pscratch/sd/e/esinha/EAMxx/heatwave_201107_{exp}_{pert}/",
-            2021: "/pscratch/sd/e/esinha/EAMxx/heatwave_2021_{exp}_{pert}/",
+            2011: f"{EAMXX_SKT_DIR}/heatwave_201107_{{exp}}_{{pert}}/",
+            2021: f"{EAMXX_SKT_DIR}/heatwave_2021_{{exp}}_{{pert}}/",
         },
         eamxx_varname="skt",
         delta_file=PGW_DELTA_DIR / "ERA5_PGWSSP245_WRF_2045.nc",

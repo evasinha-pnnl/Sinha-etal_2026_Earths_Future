@@ -104,7 +104,7 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
-from util_constants import EXPERIMENT_STYLES, FONTSIZE, PERTURBATION_MEMBERS
+from util_constants import EXPERIMENT_STYLES, FONTSIZE, OUTPUT_ROOT, PERTURBATION_MEMBERS
 from util_vector_plots import plot_mean_range
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ log = logging.getLogger(__name__)
 # Configuration defaults
 # ---------------------------------------------------------------------------
 _SRC_DIR         = Path(__file__).parent
-_ENSEMBLE_OUTPUT = _SRC_DIR / "outputs"
+_ENSEMBLE_OUTPUT = OUTPUT_ROOT
 _LINKAGE_DIR     = _ENSEMBLE_OUTPUT / "tell_heatwave_linkage"
 
 # Matches Config.year's default in analyze_tell_heatwave.py
